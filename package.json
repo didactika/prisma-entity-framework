@@ -1,0 +1,80 @@
+{
+  "name": "prisma-entity-framework",
+  "version": "0.1.0",
+  "description": "TypeScript Entity Framework for Prisma ORM with Active Record pattern, fluent query builder, relation graphs, batch operations, advanced CRUD, search filters, and pagination utilities.",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/index.cjs",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "tsup src/index.ts --dts --format cjs,esm",
+    "prepublishOnly": "npm run build",
+    "test": "jest",
+    "test:unit": "jest --testPathIgnorePatterns=integration",
+    "test:integration": "jest integration",
+    "test:all": "npm run test:unit && npm run test:integration",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:verbose": "jest --verbose",
+    "prisma:test": "prisma generate --schema=tests/prisma/schema.test.prisma",
+    "prisma:test:push": "prisma db push --schema=tests/prisma/schema.test.prisma"
+  },
+  "keywords": [
+    "prisma",
+    "entity",
+    "framework",
+    "orm",
+    "active-record",
+    "query-builder",
+    "graph",
+    "relations",
+    "batch",
+    "typescript",
+    "database",
+    "crud",
+    "search",
+    "filter",
+    "pagination"
+  ],
+  "author": "Hector Arrechea <hector.arrechea@ct.uneatlantico.es>",
+  "contributors": [
+    "Eduardo Estrada <me@e2rd0.com>"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/didactika/prisma-entity-framework.git"
+  },
+  "bugs": {
+    "url": "https://github.com/didactika/prisma-entity-framework/issues"
+  },
+  "homepage": "https://github.com/didactika/prisma-entity-framework#readme",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "devDependencies": {
+    "@jest/globals": "^30.2.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.0.0",
+    "jest": "^30.2.0",
+    "prisma": "^6.16.3",
+    "ts-jest": "^29.4.4",
+    "tsup": "^8.0.0",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "peerDependencies": {
+    "@prisma/client": ">=6.0.0"
+  }
+}

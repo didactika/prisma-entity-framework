@@ -1,0 +1,366 @@
+/**
+ * Integration test for BaseEntity with real Prisma database
+ * Uses SQLite in-memory for fast and isolated testing
+ */
+
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
+import BaseEntity from '../../src/base-entity';
+import { configurePrisma, resetPrismaConfiguration } from '../../src/config';
+import { createTestDb } from '../utils/test-db';
+import type { PrismaClient } from '@prisma/client';
+
+/**
+ * User entity for testing
+ */
+class User extends BaseEntity<any> {
+  static readonly model: any;
+
+  private _name?: string;
+  private _email?: string;
+  private _age?: number;
+  private _isActive?: boolean;
+
+  constructor(data?: any) {
+    super(data);
+  }
+
+  get name(): string | undefined {
+    return this._name;
+  }
+  set name(value: string | undefined) {
+    this._name = value;
+  }
+
+  get email(): string | undefined {
+    return this._email;
+  }
+  set email(value: string | undefined) {
+    this._email = value;
+  }
+
+  get age(): number | undefined {
+    return this._age;
+  }
+  set age(value: number | undefined) {
+    this._age = value;
+  }
+
+  get isActive(): boolean | undefined {
+    return this._isActive;
+  }
+  set isActive(value: boolean | undefined) {
+    this._isActive = value;
+  }
+}
+
+describe('BaseEntity - Integration Tests with Real Database', () => {
+  let db: Awaited<ReturnType<typeof createTestDb>>;
+  let prisma: PrismaClient;
+
+  beforeAll(async () => {
+    // Setup real test database
+    db = await createTestDb();
+    prisma = db.client;
+
+    // Configure User entity with real Prisma model
+    (User as any).model = prisma.user;
+    configurePrisma(prisma as any);
+  }, 30000); // 30 second timeout for database setup
+
+  afterAll(async () => {
+    // Cleanup database
+    await db.cleanup();
+    resetPrismaConfiguration();
+  });
+
+  beforeEach(async () => {
+    // Clear data before each test
+    await db.clear();
+  });
+
+  describe('create', () => {
+    /**
+     * Test: should create new user in database
+     */
+    it('should create new user in database', async () => {
+      const user = new User({ name: 'Alice', email: 'alice@example.com', age: 28 });
+      const result = await user.create();
+
+      expect(result).toBeDefined();
+      expect(result.id).toBeDefined();
+      expect(result.name).toBe('Alice');
+      expect(result.email).toBe('alice@example.com');
+      expect(result.age).toBe(28);
+
+      // Verify in database
+      const dbUser = await prisma.user.findUnique({ where: { id: result.id } });
+      expect(dbUser).toBeDefined();
+      expect(dbUser?.name).toBe('Alice');
+    });
+
+    /**
+     * Test: should enforce unique email constraint
+     */
+    it('should enforce unique email constraint', async () => {
+      const user1 = new User({ name: 'User 1', email: 'same@example.com' });
+      await user1.create();
+
+      const user2 = new User({ name: 'User 2', email: 'same@example.com' });
+      await expect(user2.create()).rejects.toThrow();
+    });
+  });
+
+  describe('update', () => {
+    /**
+     * Test: should update existing user
+     */
+    it('should update existing user', async () => {
+      const user = new User({ name: 'Original', email: 'original@example.com' });
+      const created = await user.create();
+
+      const userToUpdate = new User({ id: created.id, name: 'Updated', email: 'updated@example.com' });
+      const updated = await userToUpdate.update();
+
+      expect(updated.name).toBe('Updated');
+      expect(updated.email).toBe('updated@example.com');
+
+      // Verify in database
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      expect(dbUser?.name).toBe('Updated');
+    });
+  });
+
+  describe('delete', () => {
+    /**
+     * Test: should delete user from database
+     */
+    it('should delete user from database', async () => {
+      const user = new User({ name: 'ToDelete', email: 'delete@example.com' });
+      const created = await user.create();
+
+      const userToDelete = new User({ id: created.id });
+      await userToDelete.delete();
+
+      // Verify deleted from database
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      expect(dbUser).toBeNull();
+    });
+  });
+
+  describe('findByFilter', () => {
+    beforeEach(async () => {
+      // Seed test data
+      await db.seed();
+    });
+
+    /**
+     * Test: should find all users
+     */
+    it('should find all users', async () => {
+      const users = await User.findByFilter({}) as any[];
+
+      expect(Array.isArray(users)).toBe(true);
+      expect(users.length).toBe(3);
+    });
+
+    /**
+     * Test: should filter by name
+     */
+    it('should filter by name', async () => {
+      const users = await User.findByFilter({ name: 'John Doe' }) as any[];
+
+      expect(users.length).toBe(1);
+      expect(users[0].name).toBe('John Doe');
+    });
+
+    /**
+     * Test: should filter by isActive
+     */
+    it('should filter by isActive', async () => {
+      const users = await User.findByFilter({ isActive: true }) as any[];
+
+      expect(users.length).toBe(2);
+      expect(users.every((u: any) => u.isActive)).toBe(true);
+    });
+
+    /**
+     * Test: should return single entity with onlyOne option
+     */
+    it('should return single entity with onlyOne option', async () => {
+      const user = await User.findByFilter({ name: 'John Doe' }, { onlyOne: true });
+
+      expect(user).not.toBeNull();
+      expect(Array.isArray(user)).toBe(false);
+      expect((user as any).name).toBe('John Doe');
+    });
+
+    /**
+     * Test: should handle pagination
+     */
+    it('should handle pagination', async () => {
+      const result = await User.findByFilter({}, {
+        pagination: { page: 1, pageSize: 2, take: 2, skip: 0 },
+      }) as any;
+
+      expect(result).toHaveProperty('total');
+      expect(result).toHaveProperty('data');
+      expect(result.total).toBe(3);
+      expect(result.data.length).toBe(2);
+    });
+
+    /**
+     * Test: should apply string search with LIKE
+     */
+    it('should apply string search with LIKE', async () => {
+      const users = await User.findByFilter({}, {
+        search: {
+          stringSearch: [{ keys: ['name'], value: 'John', mode: 'LIKE' }],
+        },
+      }) as any[];
+
+      expect(users.length).toBeGreaterThan(0);
+      expect(users[0].name).toContain('John');
+    });
+
+    /**
+     * Test: should apply range search
+     */
+    it('should apply range search', async () => {
+      const users = await User.findByFilter({}, {
+        search: {
+          rangeSearch: [{ keys: ['age'], min: 25, max: 30 }],
+        },
+      }) as any[];
+
+      expect(users.length).toBeGreaterThan(0);
+      expect(users.every((u: any) => u.age >= 25 && u.age <= 30)).toBe(true);
+    });
+
+    /**
+     * Test: should apply ordering
+     */
+    it('should apply ordering', async () => {
+      const users = await User.findByFilter({}, {
+        orderBy: { name: 'asc' },
+      }) as any[];
+
+      expect(users[0].name).toBe('Bob Johnson');
+      expect(users[2].name).toBe('John Doe');
+    });
+  });
+
+  describe('countByFilter', () => {
+    beforeEach(async () => {
+      await db.seed();
+    });
+
+    /**
+     * Test: should count all users
+     */
+    it('should count all users', async () => {
+      const count = await User.countByFilter({});
+
+      expect(count).toBe(3);
+    });
+
+    /**
+     * Test: should count filtered users
+     */
+    it('should count filtered users', async () => {
+      const count = await User.countByFilter({ isActive: true });
+
+      expect(count).toBe(2);
+    });
+  });
+
+  describe('createMany', () => {
+    /**
+     * Test: should create multiple users
+     */
+    it('should create multiple users', async () => {
+      const users = [
+        { name: 'User 1', email: 'user1@example.com' },
+        { name: 'User 2', email: 'user2@example.com' },
+        { name: 'User 3', email: 'user3@example.com' },
+      ];
+
+      const count = await User.createMany(users);
+
+      expect(count).toBe(3);
+
+      // Verify in database
+      const dbUsers = await prisma.user.findMany();
+      expect(dbUsers.length).toBe(3);
+    });
+
+    /**
+     * Test: should handle skipDuplicates
+     * NOTE: SQLite does not support skipDuplicates parameter in createMany
+     * This test is skipped when using SQLite
+     */
+    it.skip('should handle skipDuplicates', async () => {
+      await prisma.user.create({ data: { name: 'Existing', email: 'exist@example.com' } });
+
+      const users = [
+        { name: 'New User', email: 'new@example.com' },
+        { name: 'Existing', email: 'exist@example.com' }, // Duplicate
+      ];
+
+      const count = await User.createMany(users, true);
+
+      expect(count).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('deleteByFilter', () => {
+    beforeEach(async () => {
+      await db.seed();
+    });
+
+    /**
+     * Test: should delete users by filter
+     */
+    it('should delete users by filter', async () => {
+      const count = await User.deleteByFilter({ isActive: false });
+
+      expect(count).toBe(1);
+
+      // Verify in database
+      const remainingUsers = await prisma.user.findMany();
+      expect(remainingUsers.length).toBe(2);
+      expect(remainingUsers.every((u: any) => u.isActive)).toBe(true);
+    });
+  });
+
+  describe('Relations', () => {
+    beforeEach(async () => {
+      await db.seed();
+    });
+
+    /**
+     * Test: should include related posts
+     */
+    it('should include related posts', async () => {
+      const users = await User.findByFilter({}, {
+        relationsToInclude: [{ posts: [] }],
+      }) as any[];
+
+      expect(users[0]).toHaveProperty('posts');
+      expect(Array.isArray(users[0].posts)).toBe(true);
+    });
+
+    /**
+     * Test: should include nested relations
+     */
+    it('should include nested relations', async () => {
+      const users = await User.findByFilter({}, {
+        relationsToInclude: [{ posts: [{ comments: [] }] }],
+      }) as any[];
+
+      expect(users[0]).toHaveProperty('posts');
+      if (users[0].posts.length > 0) {
+        expect(users[0].posts[0]).toHaveProperty('comments');
+      }
+    });
+  });
+});

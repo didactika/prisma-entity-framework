@@ -1,0 +1,35 @@
+# Source files
+src/
+tests/
+examples/
+
+# Config files
+tsconfig.json
+.gitignore
+
+# Git
+.git/
+.github/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docs (excepto README)
+docs/
+*.md
+!README.md
+
+# Testing
+coverage/
+.nyc_output/
+
+# Build
+*.tsbuildinfo
+
+# Misc
+.env
+.env.*
+!.env.example
