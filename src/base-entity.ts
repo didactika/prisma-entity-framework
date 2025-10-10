@@ -17,21 +17,49 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
 
     /**
      * Automatically initializes entity properties from data object
-     * Maps public property names to private properties with underscore prefix
+     * 
+     * Supports three property types:
+     * 1. Decorated properties with @Property() - Uses the setter created by decorator
+     * 2. Properties with manual getters/setters - Assigns to private _property
+     * 3. Public properties - Assigns directly to the property
      *
      * @param data - Data object to initialize from
      * @protected
      */
     protected initializeProperties(data?: Partial<TModel>): void {
         if (!data) return;
+        
+        // Get decorated properties metadata if available
+        const decoratedProperties = (this.constructor as any)._decoratedProperties as Set<string> | undefined;
+        
         Object.keys(data).forEach((key) => {
-            const privateKey = `_${key}`;
             const value = (data as any)[key];
 
             if (key === 'id') {
+                // Special case: id is always assigned directly
                 (this as any).id = value;
             } else {
-                (this as any)[privateKey] = value;
+                // Check if property is decorated with @Property()
+                const isDecorated = decoratedProperties?.has(key);
+                
+                if (isDecorated) {
+                    // For decorated properties, use the setter (which handles _key internally)
+                    (this as any)[key] = value;
+                } else {
+                    // Check if property has a getter or setter in the prototype chain
+                    const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(this), key);
+                    const hasGetterOrSetter = descriptor && (descriptor.get || descriptor.set);
+                    
+                    if (hasGetterOrSetter) {
+                        // Has manual getter/setter: assign to private _key
+                        const privateKey = `_${key}`;
+                        (this as any)[privateKey] = value;
+                    } else {
+                        // Try to assign directly first (for public properties)
+                        // This will create the property if it doesn't exist
+                        (this as any)[key] = value;
+                    }
+                }
             }
         });
     }
