@@ -2,6 +2,9 @@
 src/
 tests/
 examples/
+scripts/
+docker-compose.yml
+jest.config.js
 
 # Config files
 tsconfig.json
@@ -32,4 +35,3 @@ coverage/
 # Misc
 .env
 .env.*
-!.env.example

@@ -1,6 +1,6 @@
 {
   "name": "prisma-entity-framework",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript Entity Framework for Prisma ORM with Active Record pattern, fluent query builder, relation graphs, batch operations, advanced CRUD, search filters, and pagination utilities.",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -23,8 +23,16 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:verbose": "jest --verbose",
+    "test:mysql": "powershell -ExecutionPolicy Bypass -File ./scripts/test-mysql.ps1",
+    "test:postgresql": "powershell -ExecutionPolicy Bypass -File ./scripts/test-postgresql.ps1",
+    "test:all-databases": "powershell -ExecutionPolicy Bypass -File ./scripts/test-all-databases.ps1",
     "prisma:test": "prisma generate --schema=tests/prisma/schema.test.prisma",
-    "prisma:test:push": "prisma db push --schema=tests/prisma/schema.test.prisma"
+    "prisma:test:push": "prisma db push --schema=tests/prisma/schema.test.prisma",
+    "prisma:mysql": "prisma generate --schema=tests/prisma/schema.mysql.prisma && prisma db push --schema=tests/prisma/schema.mysql.prisma --skip-generate",
+    "prisma:postgresql": "prisma generate --schema=tests/prisma/schema.postgresql.prisma && prisma db push --schema=tests/prisma/schema.postgresql.prisma --skip-generate",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:clean": "docker-compose down -v"
   },
   "keywords": [
     "prisma",
