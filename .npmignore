@@ -9,6 +9,7 @@ tsup.config.ts
 
 # Config files
 tsconfig.json
+tsconfig.test.json
 .gitignore
 
 # Git
