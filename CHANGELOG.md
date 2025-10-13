@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2025-10-13
+
+### Fixed
+- Fixed package.json entry points to match actual build output (`index.js`/`index.mjs`)
+
+### Changed
+- Updated module exports to correctly point to CommonJS and ESM builds
+
 ## [0.1.2] - 2025-10-13
 
 ### Fixed
