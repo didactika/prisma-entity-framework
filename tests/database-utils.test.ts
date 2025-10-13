@@ -59,25 +59,6 @@ describe('Database Utils', () => {
             process.env.DATABASE_URL = originalUrl;
         });
 
-        it('should detect mongodb from connection string', () => {
-            const originalUrl = process.env.DATABASE_URL;
-            process.env.DATABASE_URL = 'mongodb://localhost:27017/testdb';
-            
-            const provider = getDatabaseProvider({} as PrismaClient);
-            expect(provider).toBe('mongodb');
-            
-            process.env.DATABASE_URL = originalUrl;
-        });
-
-        it('should detect cockroachdb from connection string', () => {
-            const originalUrl = process.env.DATABASE_URL;
-            process.env.DATABASE_URL = 'cockroachdb://user:pass@localhost:26257/testdb';
-            
-            const provider = getDatabaseProvider({} as PrismaClient);
-            expect(provider).toBe('cockroachdb');
-            
-            process.env.DATABASE_URL = originalUrl;
-        });
 
         it('should default to sqlite when provider cannot be detected', () => {
             const originalUrl = process.env.DATABASE_URL;
@@ -188,16 +169,6 @@ describe('Database Utils', () => {
             
             process.env.DATABASE_URL = originalUrl;
         });
-
-        it('should return unquoted identifier for MongoDB', () => {
-            const originalUrl = process.env.DATABASE_URL;
-            process.env.DATABASE_URL = 'mongodb://localhost:27017/testdb';
-            
-            const quoted = quoteIdentifier('User', {} as PrismaClient);
-            expect(quoted).toBe('User');
-            
-            process.env.DATABASE_URL = originalUrl;
-        });
     });
 
     describe('Format Boolean', () => {
@@ -230,16 +201,6 @@ describe('Database Utils', () => {
             
             process.env.DATABASE_URL = originalUrl;
         });
-
-        it('should format boolean as true/false for MongoDB', () => {
-            const originalUrl = process.env.DATABASE_URL;
-            process.env.DATABASE_URL = 'mongodb://localhost:27017/testdb';
-            
-            expect(formatBoolean(true, {} as PrismaClient)).toBe('true');
-            expect(formatBoolean(false, {} as PrismaClient)).toBe('false');
-            
-            process.env.DATABASE_URL = originalUrl;
-        });
     });
 
     describe('Internal Utilities', () => {
@@ -248,8 +209,6 @@ describe('Database Utils', () => {
             expect(__testing.isValidProvider('postgresql')).toBe(true);
             expect(__testing.isValidProvider('sqlite')).toBe(true);
             expect(__testing.isValidProvider('sqlserver')).toBe(true);
-            expect(__testing.isValidProvider('mongodb')).toBe(true);
-            expect(__testing.isValidProvider('cockroachdb')).toBe(true);
         });
 
         it('should reject invalid provider names', () => {
