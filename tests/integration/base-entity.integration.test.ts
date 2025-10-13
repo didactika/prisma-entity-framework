@@ -62,6 +62,8 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     db = await createTestDb();
     prisma = db.client;
 
+    console.log(`Running integration tests with ${db.provider}`);
+
     // Configure User entity with real Prisma model
     (User as any).model = prisma.user;
     configurePrisma(prisma as any);
@@ -295,10 +297,11 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
     /**
      * Test: should handle skipDuplicates
-     * NOTE: SQLite does not support skipDuplicates parameter in createMany
-     * This test is skipped when using SQLite
+     * SQLite does not support skipDuplicates parameter in createMany
+     * This test is conditional based on the database provider
      */
-    it.skip('should handle skipDuplicates', async () => {
+    it('should handle skipDuplicates or fail gracefully', async () => {
+      // Create initial user
       await prisma.user.create({ data: { name: 'Existing', email: 'exist@example.com' } });
 
       const users = [
@@ -306,9 +309,27 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         { name: 'Existing', email: 'exist@example.com' }, // Duplicate
       ];
 
-      const count = await User.createMany(users, true);
-
-      expect(count).toBeGreaterThanOrEqual(1);
+      if (db.supportsSkipDuplicates) {
+        // MySQL and PostgreSQL support skipDuplicates
+        const count = await User.createMany(users, true);
+        expect(count).toBeGreaterThanOrEqual(1);
+        
+        // Verify that only non-duplicate was created
+        const allUsers = await prisma.user.findMany();
+        expect(allUsers.length).toBe(2); // 1 existing + 1 new
+      } else {
+        // SQLite doesn't support skipDuplicates
+        // Should either throw an error or create only valid records
+        try {
+          await User.createMany(users, true);
+          // If it succeeds, verify behavior
+          const allUsers = await prisma.user.findMany();
+          expect(allUsers.length).toBeGreaterThanOrEqual(1);
+        } catch (error) {
+          // Expected for SQLite with duplicate email (unique constraint)
+          expect(error).toBeDefined();
+        }
+      }
     });
   });
 

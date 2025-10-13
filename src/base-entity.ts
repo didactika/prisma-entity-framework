@@ -5,6 +5,7 @@ import ModelUtils from "./model-utils";
 import { getPrismaInstance } from './config';
 import SearchUtils from "./search/search-utils";
 import { PrismaClient } from "@prisma/client";
+import { quoteIdentifier, formatBoolean, getDatabaseProvider } from "./database-utils";
 
 export default abstract class BaseEntity<TModel extends Record<string, any>> implements IBaseEntity<TModel> {
     static readonly model: any;
@@ -264,6 +265,11 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         if (!entityModel) throw new Error("Model is not defined in the BaseEntity class.");
         if (!Array.isArray(items) || items.length === 0) return 0;
 
+        // Check if database supports skipDuplicates (SQLite doesn't)
+        const prisma = getPrismaInstance();
+        const provider = getDatabaseProvider(prisma);
+        const supportsSkipDuplicates = provider !== 'sqlite';
+
         let totalCreated = 0;
         const processedData = items.map(item => {
             const clean = BaseEntity.sanitizeKeysRecursive(item);
@@ -282,7 +288,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             const batch = deduplicatedData.slice(i, i + BaseEntity.BATCH_SIZE);
             try {
                 const options: any = { data: batch };
-                if (skipDuplicates) {
+                if (skipDuplicates && supportsSkipDuplicates) {
                     options.skipDuplicates = true;
                 }
 
@@ -293,7 +299,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                 console.error(`❌ Error in createMany batch for ${entityModel.name} (index ${i}): ${errorMsg}`);
 
                 // If it's a unique constraint error and skipDuplicates is false, try with skipDuplicates=true
-                if (errorMsg.includes('Unique constraint failed') && !skipDuplicates) {
+                if (errorMsg.includes('Unique constraint failed') && !skipDuplicates && supportsSkipDuplicates) {
                     console.log(`🔄 Retrying batch ${i} with skipDuplicates=true...`);
                     try {
                         const retryResult = await entityModel.createMany({
@@ -305,8 +311,9 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                     } catch (retryError) {
                         throw retryError;
                     }
+                } else {
+                    throw error;
                 }
-                throw errorMsg;
             }
         }
         return totalCreated;
@@ -408,7 +415,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             });
     }
 
-    private static escapeValue(value: any): string {
+    private static escapeValue(value: any, prisma?: PrismaClient): string {
         if (value === null || value === undefined) return 'NULL';
 
         if (typeof value === 'string') {
@@ -417,7 +424,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         }
 
         if (typeof value === 'boolean') {
-            return value ? '1' : '0';
+            return formatBoolean(value, prisma);
         }
 
         if (typeof value === 'number') {
@@ -450,6 +457,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         query: string | null;
         idsInBatch: Set<number>;
     } {
+        const prisma = getPrismaInstance();
         const updates: Record<string, Record<number, any>> = {};
         const ids = new Set<number>();
         const fieldsToUpdate = new Set<string>();
@@ -484,19 +492,23 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         const setClauses = Array.from(fieldsToUpdate).map((field) => {
             const fieldUpdates = updates[field];
             const whenClauses = Object.entries(fieldUpdates)
-                .map(([id, value]) => `        WHEN ${id} THEN ${this.escapeValue(value)}`)
+                .map(([id, value]) => `        WHEN ${id} THEN ${this.escapeValue(value, prisma)}`)
                 .join('\n');
 
             // Usar el nombre de columna mapeado de la base de datos
             const dbColumnName = fieldMap[field] || field;
-            return `    \`${dbColumnName}\` = CASE \`id\`\n${whenClauses}\n        ELSE \`${dbColumnName}\`\n    END`;
+            const quotedColumn = quoteIdentifier(dbColumnName, prisma);
+            const quotedId = quoteIdentifier('id', prisma);
+            return `    ${quotedColumn} = CASE ${quotedId}\n${whenClauses}\n        ELSE ${quotedColumn}\n    END`;
         });
 
         const idList = Array.from(ids).join(', ');
+        const quotedTableName = quoteIdentifier(tableName, prisma);
+        const quotedId = quoteIdentifier('id', prisma);
 
-        const query = `UPDATE \`${tableName}\`
+        const query = `UPDATE ${quotedTableName}
                        SET ${setClauses.join(',\n')}
-                       WHERE \`id\` IN (${idList});`;
+                       WHERE ${quotedId} IN (${idList});`;
 
         return { query, idsInBatch: ids };
     }

@@ -20,6 +20,16 @@ export { default as BaseEntity } from './base-entity';
 export { default as ModelUtils } from './model-utils';
 export { default as DataUtils } from './data-utils';
 
+// Database utilities
+export {
+    getDatabaseProvider,
+    getDatabaseDialect,
+    quoteIdentifier,
+    formatBoolean,
+    type DatabaseProvider,
+    type DatabaseDialect
+} from './database-utils';
+
 // Decorators
 export { Property } from './decorators/property.decorator';
 

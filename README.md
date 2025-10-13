@@ -42,6 +42,11 @@ pnpm add prisma-entity-framework
 - Node.js >= 16
 - Prisma Client >= 4.0.0
 
+**Supported Databases:**
+- ✅ MySQL
+- ✅ PostgreSQL
+- ✅ SQLite
+- ✅ SQL Server
 ---
 
 ## 🚀 Quick Start
@@ -58,11 +63,25 @@ configurePrisma(prisma); // One-time setup
 
 ### 2. Create Entity Classes
 
+**Option A: Using @Property() Decorator (Recommended - Less Code)**
+
 ```typescript
-import { BaseEntity } from 'prisma-entity-framework';
+import { BaseEntity, Property } from 'prisma-entity-framework';
 import { User as PrismaUser } from '@prisma/client';
 import { prisma } from './prisma-client';
 
+export class User extends BaseEntity<PrismaUser> {
+    static readonly model = prisma.user;
+    
+    @Property() declare name: string;
+    @Property() declare email: string;
+    @Property() declare age: number;
+}
+```
+
+**Option B: Traditional Getters/Setters (More Control)**
+
+```typescript
 export class User extends BaseEntity<PrismaUser> {
     static readonly model = prisma.user;
     
@@ -73,9 +92,14 @@ export class User extends BaseEntity<PrismaUser> {
     set name(value: string) { this._name = value; }
     
     get email() { return this._email; }
-    set email(value: string) { this._email = value; }
+    set email(value: string) { 
+        if (!value.includes('@')) throw new Error('Invalid email');
+        this._email = value; 
+    }
 }
 ```
+
+> 💡 **Tip:** Use `@Property()` for simple properties. Use traditional getters/setters when you need validation or transformation logic.
 
 ### 3. Use Active Record Pattern
 

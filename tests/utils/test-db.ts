@@ -1,28 +1,31 @@
 /**
  * Test Database Setup and Utilities
  * Provides utilities for setting up and tearing down test databases
+ * Supports SQLite, MySQL, and PostgreSQL
  */
 
-import { PrismaClient } from '@prisma/client';
 import { join } from 'path';
+import { getDatabaseProvider } from '../../src/database-utils';
 
 /**
  * Test database configuration
  */
 export interface TestDbConfig {
-  client: PrismaClient;
+  client: any;
   cleanup: () => Promise<void>;
+  provider: 'sqlite' | 'mysql' | 'postgresql';
+  supportsSkipDuplicates: boolean;
 }
 
 /**
- * Creates a new test database with SQLite
- * This provides a real Prisma client for integration testing
+ * Creates a new test database with automatic provider detection
+ * Supports SQLite (default), MySQL, and PostgreSQL
  * 
  * @returns Test database configuration with client and cleanup function
  * 
  * @example
  * ```typescript
- * const { client, cleanup } = await setupTestDatabase();
+ * const { client, cleanup, provider } = await setupTestDatabase();
  * try {
  *   await client.user.create({ data: { name: 'Test' } });
  *   // ... run tests
@@ -32,86 +35,89 @@ export interface TestDbConfig {
  * ```
  */
 export async function setupTestDatabase(): Promise<TestDbConfig> {
-  // Use file-based SQLite for compatibility (faster than real DB, works reliably)
-  const dbPath = join(process.cwd(), 'tests', 'prisma', 'test.db');
-  const DATABASE_URL = `file:${dbPath}`;
-  process.env.DATABASE_URL = DATABASE_URL;
+  // Detect database URL from environment
+  const databaseUrl = process.env.DATABASE_URL;
+  let provider: 'sqlite' | 'mysql' | 'postgresql' = 'sqlite';
+  let client: any;
 
-  // Create Prisma client
-  const client = new PrismaClient({
-    datasources: {
-      db: {
-        url: DATABASE_URL,
-      },
-    },
-  });
+  // Determine provider from URL
+  if (databaseUrl) {
+    if (databaseUrl.startsWith('mysql://')) {
+      provider = 'mysql';
+    } else if (databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://')) {
+      provider = 'postgresql';
+    }
+  }
+
+  // Create Prisma client based on provider using the generated clients with custom output paths
+  try {
+    if (provider === 'sqlite') {
+      // Use default Prisma client for SQLite
+      const { PrismaClient } = await import('@prisma/client');
+      
+      // Use file-based SQLite for compatibility
+      const dbPath = join(process.cwd(), 'tests', 'prisma', 'test.db');
+      const DATABASE_URL = `file:${dbPath}`;
+      process.env.DATABASE_URL = DATABASE_URL;
+
+      client = new PrismaClient({
+        datasources: {
+          db: {
+            url: DATABASE_URL,
+          },
+        },
+      });
+    } else if (provider === 'mysql') {
+      // Use MySQL-specific Prisma client (generated to node_modules/.prisma/client-mysql)
+      // @ts-ignore - Dynamic import path based on runtime provider
+      const clientModule = await import('../../node_modules/.prisma/client-mysql/index.js');
+      const { PrismaClient } = clientModule;
+      client = new PrismaClient();
+    } else {
+      // Use PostgreSQL-specific Prisma client (generated to node_modules/.prisma/client-postgresql)
+      // @ts-ignore - Dynamic import path based on runtime provider
+      const clientModule = await import('../../node_modules/.prisma/client-postgresql/index.js');
+      const { PrismaClient } = clientModule;
+      client = new PrismaClient();
+    }
+  } catch (error) {
+    console.error(`❌ Failed to initialize test database:`, error);
+    throw error;
+  }
 
   try {
     // Connect to database
     await client.$connect();
 
-    // Create tables using raw SQL (faster and more reliable than CLI)
-    await client.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "User" (
-        "id" INTEGER PRIMARY KEY AUTOINCREMENT,
-        "name" TEXT NOT NULL,
-        "email" TEXT NOT NULL UNIQUE,
-        "age" INTEGER,
-        "isActive" BOOLEAN NOT NULL DEFAULT 1,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
+    // Verify provider
+    const detectedProvider = getDatabaseProvider(client);
+    console.log(`✅ Test database initialized (${detectedProvider})`);
 
-    await client.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "Post" (
-        "id" INTEGER PRIMARY KEY AUTOINCREMENT,
-        "title" TEXT NOT NULL,
-        "content" TEXT,
-        "published" BOOLEAN NOT NULL DEFAULT 0,
-        "authorId" INTEGER NOT NULL,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY ("authorId") REFERENCES "User"("id") ON DELETE CASCADE
-      );
-    `);
+    // MySQL and PostgreSQL support skipDuplicates, SQLite does not
+    const supportsSkipDuplicates = provider !== 'sqlite';
 
-    await client.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "Comment" (
-        "id" INTEGER PRIMARY KEY AUTOINCREMENT,
-        "text" TEXT NOT NULL,
-        "postId" INTEGER NOT NULL,
-        "authorId" INTEGER NOT NULL,
-        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY ("postId") REFERENCES "Post"("id") ON DELETE CASCADE,
-        FOREIGN KEY ("authorId") REFERENCES "User"("id") ON DELETE CASCADE
-      );
-    `);
+    /**
+     * Cleanup function to disconnect and clear database
+     */
+    const cleanup = async () => {
+      try {
+        // Clear all data
+        await client.comment.deleteMany();
+        await client.post.deleteMany();
+        await client.user.deleteMany();
 
-    console.log('✅ Test database initialized');
+        // Disconnect
+        await client.$disconnect();
+      } catch (error) {
+        console.error('❌ Cleanup error:', error);
+      }
+    };
+
+    return { client, cleanup, provider, supportsSkipDuplicates };
   } catch (error) {
     console.error('❌ Failed to initialize test database:', error);
     throw error;
   }
-
-  /**
-   * Cleanup function to disconnect and clear database
-   */
-  const cleanup = async () => {
-    try {
-      // Clear all data
-      await client.comment.deleteMany();
-      await client.post.deleteMany();
-      await client.user.deleteMany();
-
-      // Disconnect
-      await client.$disconnect();
-    } catch (error) {
-      console.error('❌ Cleanup error:', error);
-    }
-  };
-
-  return { client, cleanup };
 }
 
 /**
@@ -125,7 +131,7 @@ export async function setupTestDatabase(): Promise<TestDbConfig> {
  * const { users, posts, comments } = await seedTestDatabase(client);
  * ```
  */
-export async function seedTestDatabase(client: PrismaClient) {
+export async function seedTestDatabase(client: any) {
   // Create users
   const user1 = await client.user.create({
     data: {
@@ -225,7 +231,7 @@ export async function seedTestDatabase(client: PrismaClient) {
  * await clearTestDatabase(client);
  * ```
  */
-export async function clearTestDatabase(client: PrismaClient): Promise<void> {
+export async function clearTestDatabase(client: any): Promise<void> {
   // Delete in order to respect foreign key constraints
   await client.comment.deleteMany();
   await client.post.deleteMany();
@@ -259,10 +265,12 @@ export async function clearTestDatabase(client: PrismaClient): Promise<void> {
  * ```
  */
 export async function createTestDb() {
-  const { client, cleanup: cleanupDb } = await setupTestDatabase();
+  const { client, cleanup: cleanupDb, provider, supportsSkipDuplicates } = await setupTestDatabase();
 
   return {
     client,
+    provider,
+    supportsSkipDuplicates,
     seed: () => seedTestDatabase(client),
     clear: () => clearTestDatabase(client),
     cleanup: cleanupDb,

@@ -43,6 +43,11 @@ coverage/
 # Test databases
 prisma/*.db
 prisma/*.db-journal
+tests/prisma/*.db
+tests/prisma/*.db-journal
+
+# Docker volumes
+.docker/
 
 # Temporary files
 *.tmp
