@@ -5,51 +5,31 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import BaseEntity from '../../src/base-entity';
+import { Property } from '../../src/decorators/property.decorator';
 import { configurePrisma, resetPrismaConfiguration } from '../../src/config';
 import { createTestDb } from '../utils/test-db';
 import type { PrismaClient } from '@prisma/client';
 
 /**
- * User entity for testing
+ * User entity for testing using @Property() decorator
  */
-class User extends BaseEntity<any> {
+interface IUser {
+  id?: number;
+  name: string;
+  email: string;
+  age?: number;
+  isActive?: boolean;
+}
+class User extends BaseEntity<IUser> implements IUser {
   static readonly model: any;
 
-  private _name?: string;
-  private _email?: string;
-  private _age?: number;
-  private _isActive?: boolean;
+  @Property() declare name: string;
+  @Property() declare email: string;
+  @Property() declare age?: number;
+  @Property() declare isActive: boolean;
 
-  constructor(data?: any) {
+  constructor(data?: IUser) {
     super(data);
-  }
-
-  get name(): string | undefined {
-    return this._name;
-  }
-  set name(value: string | undefined) {
-    this._name = value;
-  }
-
-  get email(): string | undefined {
-    return this._email;
-  }
-  set email(value: string | undefined) {
-    this._email = value;
-  }
-
-  get age(): number | undefined {
-    return this._age;
-  }
-  set age(value: number | undefined) {
-    this._age = value;
-  }
-
-  get isActive(): boolean | undefined {
-    return this._isActive;
-  }
-  set isActive(value: boolean | undefined) {
-    this._isActive = value;
   }
 }
 
@@ -140,7 +120,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       const user = new User({ name: 'ToDelete', email: 'delete@example.com' });
       const created = await user.create();
 
-      const userToDelete = new User({ id: created.id });
+      const userToDelete = new User({ id: created.id!, name: 'ToDelete', email: 'delete@example.com' });
       await userToDelete.delete();
 
       // Verify deleted from database
@@ -313,7 +293,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         // MySQL and PostgreSQL support skipDuplicates
         const count = await User.createMany(users, true);
         expect(count).toBeGreaterThanOrEqual(1);
-        
+
         // Verify that only non-duplicate was created
         const allUsers = await prisma.user.findMany();
         expect(allUsers.length).toBe(2); // 1 existing + 1 new

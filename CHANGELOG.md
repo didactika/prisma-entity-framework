@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2025-10-13
+
+### Fixed
+- Fixed `@Property()` decorator not being exported in compiled CommonJS output
+- Removed unnecessary `emitDecoratorMetadata` from TypeScript configuration
+- Added `tsup.config.ts` for proper build configuration
+
+### Changed
+- Improved build process to ensure all decorators are properly compiled and exported
+
 ## [0.1.1] - 2025-10-13
 
 ### Added

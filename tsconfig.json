@@ -8,7 +8,6 @@
     "sourceMap": false,
     "strict": true,
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
     "strictFunctionTypes": true,

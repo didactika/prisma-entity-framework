@@ -5,6 +5,7 @@ examples/
 scripts/
 docker-compose.yml
 jest.config.js
+tsup.config.ts
 
 # Config files
 tsconfig.json
