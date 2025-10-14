@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2025-10-14
+
+### Added
+- **Wildcard Relation Includes**: Support for `"*"` in `relationsToInclude` to automatically include all first-level relations
+  - Use `relationsToInclude: "*"` in `findByFilter()` to load all direct relations
+  - Wildcard only includes first-level relations (no deep nesting)
+  - Can be mixed with specific nested relations for fine-grained control
+  - Added 6 new tests (3 unit + 3 integration) for wildcard functionality
+
+### Changed
+- Updated `ModelUtils.getIncludesTree()` to handle `"*"` parameter for first-level relation expansion
+- Enhanced `BaseEntity.findByFilter()` to accept `"*"` string in addition to arrays for `relationsToInclude`
+
 ## [0.1.4] - 2025-10-14
 
 ### Fixed

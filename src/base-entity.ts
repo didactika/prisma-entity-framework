@@ -110,8 +110,11 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         }
 
         let include = undefined;
-        if (options.relationsToInclude && options.relationsToInclude.length > 0) {
-            include = await ModelUtils.getIncludesTree(entityModel.name, options.relationsToInclude, 0);
+        if (options.relationsToInclude) {
+            if (options.relationsToInclude === "*" ||
+                (Array.isArray(options.relationsToInclude) && options.relationsToInclude.length > 0)) {
+                include = await ModelUtils.getIncludesTree(entityModel.name, options.relationsToInclude, 0);
+            }
         }
 
         let whereClauseBase = SearchUtils.applyDefaultFilters(filter, modelInfo);

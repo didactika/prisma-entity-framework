@@ -235,7 +235,10 @@ export default class ModelUtils {
             };
 
             if (tree === "*") {
-                await Promise.all(fields.map(field => processField(field.name, "*")));
+                // When using "*", include all first-level relations but don't go deeper
+                for (const field of fields) {
+                    include[field.name] = true;
+                }
             } else if (Array.isArray(tree)) {
                 for (const node of tree) {
                     for (const [relation, subTree] of Object.entries(node)) {

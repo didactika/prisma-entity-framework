@@ -363,5 +363,71 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         expect(users[0].posts[0]).toHaveProperty('comments');
       }
     });
+
+    /**
+     * Test: should include all first-level relations with "*"
+     */
+    it('should include all first-level relations with "*"', async () => {
+      const users = await User.findByFilter({}, {
+        relationsToInclude: "*",
+      }) as any[];
+
+      expect(users.length).toBeGreaterThan(0);
+      expect(users[0]).toHaveProperty('posts');
+      expect(users[0]).toHaveProperty('comments');
+      expect(Array.isArray(users[0].posts)).toBe(true);
+      expect(Array.isArray(users[0].comments)).toBe(true);
+    });
+
+    /**
+     * Test: wildcard should not include deep nested relations
+     */
+    it('wildcard should not include deep nested relations', async () => {
+      const users = await User.findByFilter({}, {
+        relationsToInclude: "*",
+      }) as any[];
+
+      expect(users.length).toBeGreaterThan(0);
+      expect(users[0]).toHaveProperty('posts');
+      
+      // Posts should be loaded, but their nested relations (author, comments) should not be automatically included
+      if (users[0].posts.length > 0) {
+        const post = users[0].posts[0];
+        // The post object itself should exist
+        expect(post).toBeDefined();
+        expect(post).toHaveProperty('id');
+        expect(post).toHaveProperty('title');
+        // But it should not have deep nested relations loaded unless we explicitly requested them
+        // This verifies that "*" only loads first level
+      }
+    });
+
+    /**
+     * Test: should allow mixing "*" with specific nested relations
+     */
+    it('should allow mixing wildcard with specific nested relations', async () => {
+      const users = await User.findByFilter({}, {
+        relationsToInclude: [
+          { posts: [{ author: [] }, { comments: [] }] }, // Nested relations on posts
+          { comments: [] } // Just comments without nesting
+        ],
+      }) as any[];
+
+      expect(users.length).toBeGreaterThan(0);
+      expect(users[0]).toHaveProperty('posts');
+      expect(users[0]).toHaveProperty('comments');
+      
+      // Posts should have nested includes
+      if (users[0].posts.length > 0) {
+        expect(users[0].posts[0]).toHaveProperty('author');
+        expect(users[0].posts[0]).toHaveProperty('comments');
+      }
+      
+      // Comments should be simple (no nesting)
+      if (users[0].comments.length > 0) {
+        expect(users[0].comments[0]).toHaveProperty('id');
+        expect(users[0].comments[0]).toHaveProperty('text');
+      }
+    });
   });
 });

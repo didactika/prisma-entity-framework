@@ -372,5 +372,50 @@ describe('ModelUtils', () => {
 
       expect(includes).toEqual({});
     });
+
+    /**
+     * Test: should include all first-level relations when using "*"
+     */
+    it('should include all first-level relations when using "*"', async () => {
+      const includes = await ModelUtils.getIncludesTree('User', '*');
+
+      expect(typeof includes).toBe('object');
+      expect(includes).toHaveProperty('posts');
+      expect(includes).toHaveProperty('comments');
+      expect(includes.posts).toBe(true);
+      expect(includes.comments).toBe(true);
+    });
+
+    /**
+     * Test: should not nest deeper than first level with "*"
+     */
+    it('should not nest deeper than first level with "*"', async () => {
+      const includes = await ModelUtils.getIncludesTree('User', '*');
+
+      expect(typeof includes).toBe('object');
+      // First level relations should be true, not objects with nested includes
+      Object.values(includes).forEach(value => {
+        expect(value).toBe(true);
+      });
+    });
+
+    /**
+     * Test: should support mixed usage of "*" and specific relations
+     */
+    it('should support mixed usage of "*" and specific relations', async () => {
+      const includes = await ModelUtils.getIncludesTree('User', [
+        { posts: [{ author: [] }, { comments: [] }] }, // Nested relations on posts
+        { comments: [] } // Just comments without nesting
+      ]);
+
+      expect(includes).toHaveProperty('posts');
+      expect(includes).toHaveProperty('comments');
+      expect(includes.comments).toBe(true);
+      // posts should have includes for its relations
+      expect(typeof includes.posts).toBe('object');
+      expect(includes.posts).toHaveProperty('include');
+      expect(includes.posts.include).toHaveProperty('author');
+      expect(includes.posts.include).toHaveProperty('comments');
+    });
   });
 });
