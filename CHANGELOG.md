@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2025-10-14
+
+### Fixed
+- Fixed `ModelUtils.getModelDependencyTree()` to include all relation fields, not just required ones
+
+### Changed
+- Improved optional chaining in `BaseEntity.findByFilter()` for safer property access
+
 ## [0.1.3] - 2025-10-13
 
 ### Fixed

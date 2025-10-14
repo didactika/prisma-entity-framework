@@ -29,10 +29,10 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
      */
     protected initializeProperties(data?: Partial<TModel>): void {
         if (!data) return;
-        
+
         // Get decorated properties metadata if available
         const decoratedProperties = (this.constructor as any)._decoratedProperties as Set<string> | undefined;
-        
+
         Object.keys(data).forEach((key) => {
             const value = (data as any)[key];
 
@@ -42,7 +42,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             } else {
                 // Check if property is decorated with @Property()
                 const isDecorated = decoratedProperties?.has(key);
-                
+
                 if (isDecorated) {
                     // For decorated properties, use the setter (which handles _key internally)
                     (this as any)[key] = value;
@@ -50,7 +50,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                     // Check if property has a getter or setter in the prototype chain
                     const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(this), key);
                     const hasGetterOrSetter = descriptor && (descriptor.get || descriptor.set);
-                    
+
                     if (hasGetterOrSetter) {
                         // Has manual getter/setter: assign to private _key
                         const privateKey = `_${key}`;
@@ -165,7 +165,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
 
             const queryPromises = chunks.map(chunkValues => {
                 const searchClone = options.search ? JSON.parse(JSON.stringify(options.search)) : undefined;
-                if (searchClone && searchClone.listSearch && searchClone.listSearch[longIndex]) {
+                if (searchClone?.listSearch?.[longIndex]) {
                     searchClone.listSearch[longIndex].values = chunkValues;
                 }
                 const whereClause = searchClone ? SearchUtils.applySearchFilter(whereClauseBase, searchClone) : whereClauseBase;

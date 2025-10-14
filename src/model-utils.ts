@@ -23,13 +23,11 @@ export default class ModelUtils {
 
             const dependencies: string[] = [];
 
-            // Get all relation fields that are required (not optional)
             const relationFields = Object.values(modelMeta.fields)
                 .filter((field: any) =>
                     field.kind === "object" &&
                     field.relationName &&
-                    !field.isList &&
-                    field.isRequired
+                    !field.isList
                 );
 
             for (const field of relationFields) {
