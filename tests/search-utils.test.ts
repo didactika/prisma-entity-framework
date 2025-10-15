@@ -3,11 +3,23 @@
  * Tests search filter application and default filter processing
  */
 
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import SearchUtils from '../src/search/search-utils';
 import { mockRuntimeDataModel } from './__mocks__/prisma-client.mock';
+import { configurePrisma, resetPrismaConfiguration } from '../src/config';
 
 describe('SearchUtils', () => {
+  // Mock Prisma client for nested relation tests
+  beforeAll(() => {
+    const mockPrisma = {
+      _runtimeDataModel: mockRuntimeDataModel,
+    };
+    configurePrisma(mockPrisma as any);
+  });
+
+  afterAll(() => {
+    resetPrismaConfiguration();
+  });
   describe('applySearchFilter', () => {
     /**
      * Test: should apply string search with LIKE
@@ -327,4 +339,80 @@ describe('SearchUtils', () => {
       expect(result[0].mode).toBe('ENDS_WITH');
     });
   });
+
+  describe('applyDefaultFilters - Nested Relations', () => {
+    /**
+     * Test: should handle deeply nested relations with correct filters
+     */
+    it('should handle deeply nested relations with correct filters', () => {
+      const filter = {
+        author: {
+          posts: {
+            title: 'Test Post'
+          }
+        }
+      };
+
+      const result = SearchUtils.applyDefaultFilters(filter, mockRuntimeDataModel.models.Comment);
+
+      // Verify the structure is correct
+      // author is a single relation (is)
+      expect(result).toHaveProperty('author');
+      expect(result.author).toHaveProperty('is');
+      // posts is an array relation (some)
+      expect(result.author.is).toHaveProperty('posts');
+      expect(result.author.is.posts).toHaveProperty('some');
+      expect(result.author.is.posts.some).toHaveProperty('title');
+      expect(result.author.is.posts.some.title).toEqual({ equals: 'Test Post' });
+    });
+
+    /**
+     * Test: should correctly identify array relations at any nesting level
+     */
+    it('should correctly identify array relations at any nesting level', () => {
+      const filter = {
+        post: {
+          comments: {
+            text: 'Great!'
+          }
+        }
+      };
+
+      const result = SearchUtils.applyDefaultFilters(filter, mockRuntimeDataModel.models.Comment);
+
+      // post is a single relation (is)
+      expect(result).toHaveProperty('post');
+      expect(result.post).toHaveProperty('is');
+      // comments is an array relation (some)
+      expect(result.post.is).toHaveProperty('comments');
+      expect(result.post.is.comments).toHaveProperty('some');
+      expect(result.post.is.comments.some).toHaveProperty('text');
+      expect(result.post.is.comments.some.text).toEqual({ equals: 'Great!' });
+    });
+
+    /**
+     * Test: should handle multiple levels of array relations
+     */
+    it('should handle multiple levels of array relations', () => {
+      const filter = {
+        posts: {
+          comments: {
+            text: 'Awesome!'
+          }
+        }
+      };
+
+      const result = SearchUtils.applyDefaultFilters(filter, mockRuntimeDataModel.models.User);
+
+      // posts is an array relation (some)
+      expect(result).toHaveProperty('posts');
+      expect(result.posts).toHaveProperty('some');
+      // comments is an array relation (some)
+      expect(result.posts.some).toHaveProperty('comments');
+      expect(result.posts.some.comments).toHaveProperty('some');
+      expect(result.posts.some.comments.some).toHaveProperty('text');
+      expect(result.posts.some.comments.some.text).toEqual({ equals: 'Awesome!' });
+    });
+  });
 });
+

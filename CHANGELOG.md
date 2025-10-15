@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2025-10-15
+
+### Fixed
+- **Nested Relation Filters**: Fixed `applyDefaultFilters()` to correctly handle deeply nested relations at any level
+  - Filters now properly propagate model information through all nesting levels
+  - Array relations (`some`) and single relations (`is`) are correctly identified at any depth
+  - Added `getRelationModelInfo()` helper to resolve model info for nested relations
+  - Added 3 new tests for deeply nested relation filtering
+
+### Changed
+- Enhanced `SearchUtils.buildDefaultCondition()` to retrieve and pass correct model info for nested relations
+- Improved nested filter handling for complex relation structures (e.g., `group: { groupMembers: { userId: 81 } }`)
+
 ## [0.1.7] - 2025-10-14
 
 ### Added

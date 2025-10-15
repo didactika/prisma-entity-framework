@@ -2,6 +2,7 @@ import SearchBuilder from "./search-builder";
 import {FindByFilterOptions} from "../types/search.types";
 import ConditionUtils from "./condition-utils";
 import ObjectUtils from "./object-utils";
+import { getPrismaInstance } from "../config";
 
 /**
  * SearchUtils class for high-level search filter operations
@@ -105,7 +106,10 @@ export default  class SearchUtils {
         }
 
         if (typeof value === "object" && value !== null) {
-            const nested = this.applyDefaultFilters(value, modelInfo);
+            // Get the model info for the nested relation
+            const nestedModelInfo = fieldName && modelInfo ? this.getRelationModelInfo(fieldName, modelInfo) : undefined;
+            
+            const nested = this.applyDefaultFilters(value, nestedModelInfo);
             if (!ConditionUtils.isValid(nested)) return undefined;
 
             // Detectar si es una relación de array
@@ -139,6 +143,37 @@ export default  class SearchUtils {
 
         // Es una relación de array si es tipo object y tiene isList = true
         return field.kind === 'object' && field.isList === true;
+    }
+
+    /**
+     * Gets the model info for a related field
+     * 
+     * @param fieldName - The name of the relation field
+     * @param modelInfo - Parent model information
+     * @returns Model info for the related model, or undefined if not found
+     * @private
+     */
+    private static getRelationModelInfo(fieldName: string, modelInfo: any): any {
+        if (!modelInfo?.fields) return undefined;
+
+        const field = modelInfo.fields.find((f: any) => f.name === fieldName);
+        if (!field || field.kind !== 'object') return undefined;
+
+        // Get the related model name
+        const relatedModelName = field.type;
+        
+        try {
+            const prisma = getPrismaInstance();
+            const runtimeDataModel = (prisma as any)._runtimeDataModel;
+            
+            if (!runtimeDataModel?.models?.[relatedModelName]) {
+                return undefined;
+            }
+
+            return runtimeDataModel.models[relatedModelName];
+        } catch (error) {
+            return undefined;
+        }
     }
 
 
