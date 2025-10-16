@@ -403,7 +403,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     });
 
     /**
-     * Test: should allow mixing "*" with specific nested relations
+     * Test: should allow mixing wildcard with specific nested relations
      */
     it('should allow mixing wildcard with specific nested relations', async () => {
       const users = await User.findByFilter({}, {
@@ -428,6 +428,706 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         expect(users[0].comments[0]).toHaveProperty('id');
         expect(users[0].comments[0]).toHaveProperty('text');
       }
+    });
+
+    /**
+     * Test: should correctly merge filters with nested relations and string search
+     */
+    it('should correctly merge filters with nested relations and string search', async () => {
+      // This test simulates the real-world scenario where you have:
+      // 1. A filter with nested relations (e.g., posts.comments.authorId)
+      // 2. A string search on a nested field (e.g., posts.title)
+      // The ObjectUtils.assign should merge them correctly into the 'is/some' structure
+      
+      const users = await User.findByFilter(
+        {
+          posts: {
+            comments: {
+              authorId: 2
+            }
+          }
+        } as any,
+        {
+          search: {
+            stringSearch: [
+              {
+                keys: ['posts.title'],
+                value: 'Post',
+                mode: 'LIKE',
+                grouping: 'and'
+              }
+            ]
+          },
+          relationsToInclude: [{ posts: [{ comments: [] }] }]
+        }
+      ) as any[];
+
+      // Should not throw an error about unknown arguments
+      expect(Array.isArray(users)).toBe(true);
+      
+      // If results exist, they should have the correct structure
+      if (users.length > 0) {
+        expect(users[0]).toHaveProperty('posts');
+        if (users[0].posts.length > 0) {
+          expect(users[0].posts[0]).toHaveProperty('title');
+          expect(users[0].posts[0].title).toContain('Post');
+          expect(users[0].posts[0]).toHaveProperty('comments');
+        }
+      }
+    });
+
+    /**
+     * Test: should handle deeply nested filter with search on same relation
+     */
+    it('should handle deeply nested filter with search on same relation', async () => {
+      // Test case where both filter and search target the same nested relation
+      // Filter: posts.authorId = 1
+      // Search: posts.title LIKE 'First'
+      // Both should merge into the same posts.is structure
+      
+      const users = await User.findByFilter(
+        {
+          posts: {
+            authorId: 1
+          }
+        } as any,
+        {
+          search: {
+            stringSearch: [
+              {
+                keys: ['posts.title'],
+                value: 'First',
+                mode: 'LIKE'
+              }
+            ]
+          }
+        }
+      ) as any[];
+
+      expect(Array.isArray(users)).toBe(true);
+      
+      // Should find user with id=1 who has posts
+      if (users.length > 0) {
+        expect(users[0].id).toBe(1);
+      }
+    });
+
+    /**
+     * Test: should merge multiple nested paths correctly
+     */
+    it('should merge multiple nested paths correctly', async () => {
+      // Complex case with multiple nested paths on the same relation
+      const users = await User.findByFilter(
+        {
+          posts: {
+            published: true
+          }
+        } as any,
+        {
+          search: {
+            stringSearch: [
+              {
+                keys: ['posts.title'],
+                value: 'Post',
+                mode: 'LIKE'
+              },
+              {
+                keys: ['posts.content'],
+                value: 'post',
+                mode: 'LIKE'
+              }
+            ]
+          }
+        }
+      ) as any[];
+
+      // Should execute without errors
+      expect(Array.isArray(users)).toBe(true);
+    });
+  });
+
+  describe('Search with nested array relations', () => {
+    beforeEach(async () => {
+      await db.seed();
+    });
+
+    /**
+     * Test: should handle search on nested array relation with single relation
+     * Path: posts.author.name (array → single)
+     * Expected structure: { posts: { some: { author: { is: { name: {...} } } } } }
+     */
+    it('should handle search on posts.author.name (array → single)', async () => {
+      const users = await User.findByFilter(
+        {},
+        {
+          search: {
+            stringSearch: [
+              {
+                keys: ['posts.author.name'],
+                value: 'John',
+                mode: 'LIKE'
+              }
+            ]
+          }
+        }
+      ) as any[];
+
+      // Should not throw "Unknown argument `author`" error
+      expect(Array.isArray(users)).toBe(true);
+    });
+
+    /**
+     * Test: should handle search on deeply nested array relations
+     * Path: posts.comments.author.name (array → array → single)
+     * Expected structure: { posts: { some: { comments: { some: { author: { is: { name: {...} } } } } } } }
+     */
+    it('should handle search on posts.comments.author.name (array → array → single)', async () => {
+      const users = await User.findByFilter(
+        {},
+        {
+          search: {
+            stringSearch: [
+              {
+                keys: ['posts.comments.author.name'],
+                value: 'John',
+                mode: 'LIKE'
+              }
+            ]
+          }
+        }
+      ) as any[];
+
+      // Should not throw error about unknown arguments
+      expect(Array.isArray(users)).toBe(true);
+    });
+
+    /**
+     * Test: should combine base filter on array relation with search on nested field
+     * Base filter: posts.published = true (needs 'some')
+     * Search: posts.author.name LIKE 'John' (needs 'some' → 'is')
+     */
+    it('should combine filter and search on same nested array relation', async () => {
+      const users = await User.findByFilter(
+        {
+          posts: {
+            published: true
+          }
+        } as any,
+        {
+          search: {
+            stringSearch: [
+              {
+                keys: ['posts.author.name'],
+                value: 'John',
+                mode: 'LIKE'
+              }
+            ]
+          }
+        }
+      ) as any[];
+
+      expect(Array.isArray(users)).toBe(true);
+    });
+
+    /**
+     * Test: should handle search with ENDS_WITH operator on nested path
+     * This is the exact scenario from the user's bug report
+     */
+    it('should handle ENDS_WITH search on nested array relation path', async () => {
+      const users = await User.findByFilter(
+        {},
+        {
+          search: {
+            stringSearch: [
+              {
+                keys: ['posts.author.email'],
+                value: '@example.com',
+                mode: 'ENDS_WITH'
+              }
+            ]
+          }
+        }
+      ) as any[];
+
+      // Should not throw "Unknown argument `author`. Did you mean `every`?" error
+      expect(Array.isArray(users)).toBe(true);
+      
+      // If results exist, verify they match
+      if (users.length > 0) {
+        // Users should have posts with authors whose emails end with @example.com
+        expect(users[0]).toHaveProperty('id');
+      }
+    });
+
+    /**
+     * Test: should handle multiple search keys on nested array relations
+     */
+    it('should handle multiple nested array relation searches', async () => {
+      const users = await User.findByFilter(
+        {},
+        {
+          search: {
+            stringSearch: [
+              {
+                keys: ['posts.title', 'posts.author.name'],
+                value: 'Post',
+                mode: 'LIKE',
+                grouping: 'or'
+              }
+            ]
+          }
+        }
+      ) as any[];
+
+      expect(Array.isArray(users)).toBe(true);
+    });
+
+    /**
+     * Test: should handle range search on nested array relation
+     */
+    it('should handle range search on nested array relation', async () => {
+      const users = await User.findByFilter(
+        {},
+        {
+          search: {
+            rangeSearch: [
+              {
+                keys: ['posts.author.age'],
+                min: 25,
+                max: 35
+              }
+            ]
+          }
+        }
+      ) as any[];
+
+      expect(Array.isArray(users)).toBe(true);
+    });
+
+    /**
+     * Test: should handle search on comments.author.name (array → single)
+     */
+    it('should handle search on comments.author.name', async () => {
+      const users = await User.findByFilter(
+        {},
+        {
+          search: {
+            stringSearch: [
+              {
+                keys: ['comments.author.name'],
+                value: 'John',
+                mode: 'LIKE'
+              }
+            ]
+          }
+        }
+      ) as any[];
+
+      expect(Array.isArray(users)).toBe(true);
+    });
+
+    /**
+     * Test: should handle mixed single and array relations in path
+     * Path: posts.comments.post.author.name (array → array → single → single)
+     */
+    it('should handle complex mixed relation path', async () => {
+      const users = await User.findByFilter(
+        {},
+        {
+          search: {
+            stringSearch: [
+              {
+                keys: ['posts.comments.post.author.name'],
+                value: 'John',
+                mode: 'LIKE'
+              }
+            ]
+          }
+        }
+      ) as any[];
+
+      // Should handle the complex path without errors
+      expect(Array.isArray(users)).toBe(true);
+    });
+  });
+
+  describe('Upsert Operations', () => {
+    beforeEach(async () => {
+      await db.clear();
+    });
+
+    describe('upsert', () => {
+      /**
+       * Test: should create new user when doesn't exist (real database)
+       */
+      it('should create new user when doesn\'t exist', async () => {
+        const userData = { name: 'New User', email: 'newuser@example.com', age: 25 };
+        
+        const result = await User.upsert(userData);
+
+        expect(result).toBeDefined();
+        expect(result.id).toBeDefined();
+        expect(result.name).toBe('New User');
+        expect(result.email).toBe('newuser@example.com');
+        expect(result.age).toBe(25);
+
+        // Verify in database
+        const dbUser = await prisma.user.findUnique({ where: { email: 'newuser@example.com' } });
+        expect(dbUser).toBeDefined();
+        expect(dbUser?.name).toBe('New User');
+      });
+
+      /**
+       * Test: should update existing user when changes detected
+       */
+      it('should update existing user when changes detected', async () => {
+        // Create initial user
+        const created = await prisma.user.create({
+          data: { name: 'Old Name', email: 'update@example.com', age: 30 }
+        });
+
+        // Upsert with changes
+        const result = await User.upsert({
+          email: 'update@example.com',
+          name: 'New Name',
+          age: 35
+        });
+
+        expect(result.id).toBe(created.id);
+        expect(result.name).toBe('New Name');
+        expect(result.age).toBe(35);
+
+        // Verify in database
+        const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+        expect(dbUser?.name).toBe('New Name');
+        expect(dbUser?.age).toBe(35);
+      });
+
+      /**
+       * Test: should return existing user when no changes detected
+       */
+      it('should return existing user when no changes detected', async () => {
+        // Create initial user
+        const created = await prisma.user.create({
+          data: { name: 'Same Name', email: 'same@example.com', age: 28 }
+        });
+
+        const createdUpdatedAt = created.updatedAt;
+
+        // Small delay to ensure updatedAt would change if updated
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Upsert with same data
+        const result = await User.upsert({
+          email: 'same@example.com',
+          name: 'Same Name',
+          age: 28
+        });
+
+        expect(result.id).toBe(created.id);
+        expect(result.name).toBe('Same Name');
+        expect(result.age).toBe(28);
+
+        // Verify no update occurred in database
+        const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+        expect(dbUser?.updatedAt?.getTime()).toBe(createdUpdatedAt?.getTime());
+      });
+
+      /**
+       * Test: should handle boolean fields in change detection
+       */
+      it('should handle boolean fields in change detection', async () => {
+        // Create user with isActive = true
+        const created = await prisma.user.create({
+          data: { name: 'Active User', email: 'active@example.com', isActive: true }
+        });
+
+        // Upsert changing isActive to false
+        const result = await User.upsert({
+          email: 'active@example.com',
+          name: 'Active User',
+          isActive: false
+        });
+
+        expect(result.id).toBe(created.id);
+        expect(result.isActive).toBe(false);
+
+        // Verify in database
+        const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+        expect(dbUser?.isActive).toBe(false);
+      });
+
+      /**
+       * Test: should handle partial updates (only changed fields)
+       */
+      it('should handle partial updates', async () => {
+        // Create initial user
+        const created = await prisma.user.create({
+          data: { name: 'Original Name', email: 'partial@example.com', age: 30, isActive: true }
+        });
+
+        // Upsert changing only name
+        const result = await User.upsert({
+          email: 'partial@example.com',
+          name: 'Updated Name'
+        });
+
+        expect(result.id).toBe(created.id);
+        expect(result.name).toBe('Updated Name');
+        expect(result.age).toBe(30); // Should keep original value
+        expect(result.isActive).toBe(true); // Should keep original value
+
+        // Verify in database
+        const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+        expect(dbUser?.name).toBe('Updated Name');
+        expect(dbUser?.age).toBe(30);
+        expect(dbUser?.isActive).toBe(true);
+      });
+    });
+
+    describe('upsertMany', () => {
+      /**
+       * Test: should handle mixed operations (create, update, unchanged)
+       */
+      it('should handle mixed operations in real database', async () => {
+        // Create one existing user
+        await prisma.user.create({
+          data: { name: 'Existing User', email: 'existing@example.com', age: 30 }
+        });
+
+        const items = [
+          { name: 'New User', email: 'new@example.com', age: 25 }, // Will be created
+          { name: 'Updated User', email: 'existing@example.com', age: 35 }, // Will be updated
+          { name: 'Existing User', email: 'existing@example.com', age: 30 } // Will be unchanged (processed as same as previous)
+        ];
+
+        const result = await User.upsertMany(items);
+
+        expect(result.total).toBe(3);
+        expect(result.created).toBeGreaterThanOrEqual(1);
+        expect(result.updated).toBeGreaterThanOrEqual(0);
+
+        // Verify in database
+        const allUsers = await prisma.user.findMany();
+        expect(allUsers.length).toBeGreaterThanOrEqual(2);
+
+        // Check new user was created
+        const newUser = await prisma.user.findUnique({ where: { email: 'new@example.com' } });
+        expect(newUser).toBeDefined();
+        expect(newUser?.name).toBe('New User');
+
+        // Check existing user
+        const existingUser = await prisma.user.findUnique({ where: { email: 'existing@example.com' } });
+        expect(existingUser).toBeDefined();
+      });
+
+      /**
+       * Test: should create all records when none exist
+       */
+      it('should create all records when none exist', async () => {
+        const items = [
+          { name: 'User 1', email: 'user1@example.com', age: 25 },
+          { name: 'User 2', email: 'user2@example.com', age: 30 },
+          { name: 'User 3', email: 'user3@example.com', age: 35 }
+        ];
+
+        const result = await User.upsertMany(items);
+
+        expect(result.total).toBe(3);
+        expect(result.created).toBe(3);
+        expect(result.updated).toBe(0);
+        expect(result.unchanged).toBe(0);
+
+        // Verify in database
+        const allUsers = await prisma.user.findMany();
+        expect(allUsers.length).toBe(3);
+      });
+
+      /**
+       * Test: should update all records when all exist with changes
+       */
+      it('should update all records when all exist with changes', async () => {
+        // Create initial users
+        await prisma.user.createMany({
+          data: [
+            { name: 'User 1 Old', email: 'user1@example.com', age: 25 },
+            { name: 'User 2 Old', email: 'user2@example.com', age: 30 }
+          ]
+        });
+
+        // Upsert with updated data
+        const items = [
+          { name: 'User 1 New', email: 'user1@example.com', age: 26 },
+          { name: 'User 2 New', email: 'user2@example.com', age: 31 }
+        ];
+
+        const result = await User.upsertMany(items);
+
+        expect(result.total).toBe(2);
+        expect(result.created).toBe(0);
+        expect(result.updated).toBe(2);
+        expect(result.unchanged).toBe(0);
+
+        // Verify updates in database
+        const user1 = await prisma.user.findUnique({ where: { email: 'user1@example.com' } });
+        expect(user1?.name).toBe('User 1 New');
+        expect(user1?.age).toBe(26);
+
+        const user2 = await prisma.user.findUnique({ where: { email: 'user2@example.com' } });
+        expect(user2?.name).toBe('User 2 New');
+        expect(user2?.age).toBe(31);
+      });
+
+      /**
+       * Test: should return correct counts for unchanged records
+       */
+      it('should skip update when no changes detected', async () => {
+        // Create initial users
+        const created = await prisma.user.create({
+          data: { name: 'Same User', email: 'same@example.com', age: 30 }
+        });
+
+        const createdUpdatedAt = created.updatedAt;
+
+        // Small delay
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Upsert with same data
+        const items = [
+          { name: 'Same User', email: 'same@example.com', age: 30 }
+        ];
+
+        const result = await User.upsertMany(items);
+
+        expect(result.total).toBe(1);
+        expect(result.created).toBe(0);
+        expect(result.updated).toBe(0);
+        expect(result.unchanged).toBe(1);
+
+        // Verify no update occurred
+        const dbUser = await prisma.user.findUnique({ where: { email: 'same@example.com' } });
+        expect(dbUser?.updatedAt?.getTime()).toBe(createdUpdatedAt?.getTime());
+      });
+
+      /**
+       * Test: should return zero counts for empty array
+       */
+      it('should return zero counts for empty array', async () => {
+        const result = await User.upsertMany([]);
+
+        expect(result).toEqual({
+          created: 0,
+          updated: 0,
+          unchanged: 0,
+          total: 0
+        });
+
+        // Verify no changes in database
+        const allUsers = await prisma.user.findMany();
+        expect(allUsers.length).toBe(0);
+      });
+
+      /**
+       * Test: should handle large batch upserts
+       */
+      it('should handle large batch upserts', async () => {
+        // Create some existing users
+        await prisma.user.createMany({
+          data: [
+            { name: 'Existing 1', email: 'exist1@example.com', age: 25 },
+            { name: 'Existing 2', email: 'exist2@example.com', age: 30 }
+          ]
+        });
+
+        // Create large batch with mix of new and existing
+        const items = [];
+        for (let i = 1; i <= 20; i++) {
+          items.push({
+            name: `User ${i}`,
+            email: `user${i}@example.com`,
+            age: 20 + i
+          });
+        }
+
+        // Update existing ones
+        items[0] = { name: 'Existing 1 Updated', email: 'exist1@example.com', age: 26 };
+        items[1] = { name: 'Existing 2 Updated', email: 'exist2@example.com', age: 31 };
+
+        const result = await User.upsertMany(items);
+
+        expect(result.total).toBe(20);
+        expect(result.created).toBeGreaterThanOrEqual(18);
+        expect(result.updated).toBeGreaterThanOrEqual(2);
+
+        // Verify total count in database
+        const allUsers = await prisma.user.findMany();
+        expect(allUsers.length).toBeGreaterThanOrEqual(20);
+      });
+
+      /**
+       * Test: should properly handle upserts without keyTransformTemplate
+       */
+      it('should handle upsert without keyTransformTemplate', async () => {
+        const items = [
+          { name: 'Transform User', email: 'transform@example.com', age: 30 }
+        ];
+
+        const result = await User.upsertMany(items);
+
+        expect(result.total).toBe(1);
+        expect(result.created).toBe(1);
+
+        // Verify in database
+        const dbUser = await prisma.user.findUnique({ where: { email: 'transform@example.com' } });
+        expect(dbUser).toBeDefined();
+      });
+    });
+
+    describe('upsert edge cases', () => {
+      /**
+       * Test: should handle null and undefined values correctly
+       */
+      it('should handle null and undefined values in upsert', async () => {
+        const created = await prisma.user.create({
+          data: { name: 'User With Age', email: 'nulltest@example.com', age: 30 }
+        });
+
+        // Upsert with age undefined (should keep original)
+        const result = await User.upsert({
+          email: 'nulltest@example.com',
+          name: 'User With Age',
+          age: undefined
+        });
+
+        expect(result.id).toBe(created.id);
+
+        // Verify age was preserved
+        const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+        expect(dbUser?.age).toBe(30);
+      });
+
+      /**
+       * Test: should handle upsert when only optional fields change
+       */
+      it('should detect changes in optional fields', async () => {
+        await prisma.user.create({
+          data: { name: 'User', email: 'optional@example.com', age: 25, isActive: true }
+        });
+
+        // Change only isActive
+        const result = await User.upsert({
+          email: 'optional@example.com',
+          name: 'User',
+          age: 25,
+          isActive: false
+        });
+
+        expect(result.isActive).toBe(false);
+
+        // Verify in database
+        const dbUser = await prisma.user.findUnique({ where: { email: 'optional@example.com' } });
+        expect(dbUser?.isActive).toBe(false);
+      });
     });
   });
 });

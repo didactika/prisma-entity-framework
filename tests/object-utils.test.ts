@@ -216,4 +216,323 @@ describe('ObjectUtils', () => {
       expect(filter).toEqual({ name: 'John' });
     });
   });
+
+  describe('assign - Prisma filter structures', () => {
+    /**
+     * Test: should merge with existing 'is' wrapper
+     */
+    it('should merge with existing "is" wrapper', () => {
+      const target = { group: { is: { id: 1 } } };
+      ObjectUtils.assign(target, 'group.name', 'Math');
+      
+      expect(target).toEqual({
+        group: {
+          is: {
+            id: 1,
+            name: 'Math'
+          }
+        }
+      });
+    });
+
+    /**
+     * Test: should merge nested path with existing 'is' wrapper
+     */
+    it('should merge nested path with existing "is" wrapper', () => {
+      const target = { 
+        group: { 
+          is: { 
+            groupMembers: { 
+              some: { userId: 81 } 
+            } 
+          } 
+        } 
+      };
+      ObjectUtils.assign(target, 'group.course.idNumber', 'CS101');
+      
+      expect(target).toEqual({
+        group: {
+          is: {
+            groupMembers: {
+              some: { userId: 81 }
+            },
+            course: {
+              idNumber: 'CS101'
+            }
+          }
+        }
+      });
+    });
+
+    /**
+     * Test: should merge with existing 'some' wrapper
+     */
+    it('should merge with existing "some" wrapper', () => {
+      const target = { posts: { some: { published: true } } };
+      ObjectUtils.assign(target, 'posts.title', { contains: 'TypeScript' });
+      
+      expect(target).toEqual({
+        posts: {
+          some: {
+            published: true,
+            title: { contains: 'TypeScript' }
+          }
+        }
+      });
+    });
+
+    /**
+     * Test: should handle deeply nested Prisma structures
+     */
+    it('should handle deeply nested Prisma structures', () => {
+      const target = {
+        author: {
+          is: {
+            posts: {
+              some: {
+                published: true
+              }
+            }
+          }
+        }
+      };
+      ObjectUtils.assign(target, 'author.posts.comments.text', { contains: 'Great!' });
+      
+      expect(target).toEqual({
+        author: {
+          is: {
+            posts: {
+              some: {
+                published: true,
+                comments: {
+                  text: { contains: 'Great!' }
+                }
+              }
+            }
+          }
+        }
+      });
+    });
+
+    /**
+     * Test: should work with mixed is/some wrappers
+     */
+    it('should work with mixed is/some wrappers', () => {
+      const target = {
+        post: {
+          is: {
+            author: {
+              is: {
+                name: 'John'
+              }
+            }
+          }
+        }
+      };
+      ObjectUtils.assign(target, 'post.author.email', 'john@example.com');
+      
+      expect(target).toEqual({
+        post: {
+          is: {
+            author: {
+              is: {
+                name: 'John',
+                email: 'john@example.com'
+              }
+            }
+          }
+        }
+      });
+    });
+
+    /**
+     * Test: should create Prisma structures when modelInfo is provided
+     */
+    it('should create Prisma structures with modelInfo for array relations', () => {
+      const target = {};
+      const mockModelInfo = {
+        fields: [
+          { name: 'posts', kind: 'object', isList: true, type: 'Post' }
+        ]
+      };
+      
+      ObjectUtils.assign(target, 'posts.title', { contains: 'Test' }, mockModelInfo);
+      
+      expect(target).toEqual({
+        posts: {
+          some: {
+            title: { contains: 'Test' }
+          }
+        }
+      });
+    });
+
+    /**
+     * Test: should create Prisma structures with modelInfo for single relations
+     */
+    it('should create Prisma structures with modelInfo for single relations', () => {
+      const target = {};
+      const mockModelInfo = {
+        fields: [
+          { name: 'author', kind: 'object', isList: false, type: 'User' }
+        ]
+      };
+      
+      ObjectUtils.assign(target, 'author.name', { contains: 'John' }, mockModelInfo);
+      
+      expect(target).toEqual({
+        author: {
+          is: {
+            name: { contains: 'John' }
+          }
+        }
+      });
+    });
+
+    /**
+     * Test: should create nested Prisma structures with modelInfo
+     */
+    it('should create nested Prisma structures with modelInfo', () => {
+      const target = {};
+      const mockModelInfo = {
+        fields: [
+          { name: 'posts', kind: 'object', isList: true, type: 'Post' }
+        ]
+      };
+      
+      ObjectUtils.assign(target, 'posts.author.name', { contains: 'John' }, mockModelInfo);
+      
+      expect(target).toEqual({
+        posts: {
+          some: {
+            author: {
+              name: { contains: 'John' }
+            }
+          }
+        }
+      });
+    });
+  });
+
+  describe('buildWithRelations', () => {
+    /**
+     * Test: should behave like build() when modelInfo is not provided
+     */
+    it('should behave like build() when modelInfo is not provided', () => {
+      const result = ObjectUtils.buildWithRelations('group.name', { contains: 'A' });
+      expect(result).toEqual({
+        group: {
+          name: { contains: 'A' }
+        }
+      });
+    });
+
+    /**
+     * Test: should behave like build() for non-relation fields
+     */
+    it('should behave like build() for non-relation fields', () => {
+      const mockModelInfo = {
+        fields: [
+          { name: 'name', kind: 'scalar' },
+          { name: 'email', kind: 'scalar' }
+        ]
+      };
+      
+      const result = ObjectUtils.buildWithRelations('name', { contains: 'John' }, mockModelInfo);
+      expect(result).toEqual({
+        name: { contains: 'John' }
+      });
+    });
+
+    /**
+     * Test: should wrap single relations with 'is'
+     */
+    it('should wrap single relations with is', () => {
+      const mockModelInfo = {
+        fields: [
+          { 
+            name: 'user', 
+            kind: 'object', 
+            isList: false,
+            type: 'User'
+          }
+        ]
+      };
+      
+      const result = ObjectUtils.buildWithRelations('user.name', { contains: 'John' }, mockModelInfo);
+      expect(result).toEqual({
+        user: {
+          is: {
+            name: { contains: 'John' }
+          }
+        }
+      });
+    });
+
+    /**
+     * Test: should wrap array relations with 'some'
+     */
+    it('should wrap array relations with some', () => {
+      const mockModelInfo = {
+        fields: [
+          { 
+            name: 'posts', 
+            kind: 'object', 
+            isList: true,
+            type: 'Post'
+          }
+        ]
+      };
+      
+      const result = ObjectUtils.buildWithRelations('posts.title', { contains: 'Test' }, mockModelInfo);
+      expect(result).toEqual({
+        posts: {
+          some: {
+            title: { contains: 'Test' }
+          }
+        }
+      });
+    });
+
+    /**
+     * Test: should handle simple field path (no relations)
+     */
+    it('should handle simple field path without relations', () => {
+      const mockModelInfo = {
+        fields: [
+          { name: 'name', kind: 'scalar' }
+        ]
+      };
+      
+      const result = ObjectUtils.buildWithRelations('name', { equals: 'John' }, mockModelInfo);
+      expect(result).toEqual({
+        name: { equals: 'John' }
+      });
+    });
+
+    /**
+     * Test: should handle empty modelInfo gracefully
+     */
+    it('should handle empty modelInfo gracefully', () => {
+      const result = ObjectUtils.buildWithRelations('user.name', { contains: 'John' }, {});
+      expect(result).toEqual({
+        user: {
+          name: { contains: 'John' }
+        }
+      });
+    });
+
+    /**
+     * Test: should handle modelInfo without fields
+     */
+    it('should handle modelInfo without fields', () => {
+      const mockModelInfo = { name: 'User' };
+      const result = ObjectUtils.buildWithRelations('user.name', { contains: 'John' }, mockModelInfo);
+      expect(result).toEqual({
+        user: {
+          name: { contains: 'John' }
+        }
+      });
+    });
+  });
 });

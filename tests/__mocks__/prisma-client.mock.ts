@@ -113,8 +113,31 @@ export const mockRuntimeDataModel = {
         { name: 'createdAt', kind: 'scalar', isList: false },
         { name: 'updatedAt', kind: 'scalar', isList: false },
       ],
+      uniqueFields: [
+        ['email'],
+      ],
+      uniqueIndexes: [],
       dbName: 'users',
       name: 'User',
+    },
+    user: {
+      fields: [
+        { name: 'id', kind: 'scalar', isList: false },
+        { name: 'name', kind: 'scalar', isList: false },
+        { name: 'email', kind: 'scalar', isList: false, isUnique: true },
+        { name: 'age', kind: 'scalar', isList: false },
+        { name: 'isActive', kind: 'scalar', isList: false },
+        { name: 'posts', kind: 'object', isList: true, type: 'Post', relationName: 'UserPosts' },
+        { name: 'comments', kind: 'object', isList: true, type: 'Comment', relationName: 'UserComments' },
+        { name: 'createdAt', kind: 'scalar', isList: false },
+        { name: 'updatedAt', kind: 'scalar', isList: false },
+      ],
+      uniqueFields: [
+        ['email'],
+      ],
+      uniqueIndexes: [],
+      dbName: 'users',
+      name: 'user',
     },
     Post: {
       fields: [
@@ -206,6 +229,35 @@ export function createMockModel(data: any[], modelName: string = 'Model') {
       }
 
       return result;
+    }),
+
+    findFirst: jest.fn().mockImplementation(async (args?: any) => {
+      let result = [...dataset];
+
+      if (args?.where) {
+        result = result.filter((item) => {
+          return Object.entries(args.where).every(([key, value]: [string, any]) => {
+            if (value && typeof value === 'object' && 'equals' in value) {
+              return item[key] === value.equals;
+            }
+            if (value && typeof value === 'object' && 'contains' in value) {
+              return item[key]?.toLowerCase().includes(value.contains.toLowerCase());
+            }
+            if (value && typeof value === 'object' && 'gte' in value) {
+              return item[key] >= value.gte;
+            }
+            if (value && typeof value === 'object' && 'lte' in value) {
+              return item[key] <= value.lte;
+            }
+            if (value && typeof value === 'object' && 'in' in value) {
+              return value.in.includes(item[key]);
+            }
+            return item[key] === value;
+          });
+        });
+      }
+
+      return result.length > 0 ? result[0] : null;
     }),
 
     count: jest.fn().mockImplementation(async (args?: any) => {

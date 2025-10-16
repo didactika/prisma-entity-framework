@@ -14,6 +14,7 @@ export default class SearchBuilder {
      * 
      * @param baseFilter - The base filter object to extend
      * @param options - Search options containing string, range, and list searches
+     * @param modelInfo - Optional Prisma model information for relation detection
      * @returns Combined filter object with all search conditions applied
      * 
      * @example
@@ -30,13 +31,14 @@ export default class SearchBuilder {
      */
     public static build(
         baseFilter: Record<string, any>,
-        options: FindByFilterOptions.SearchOptions
+        options: FindByFilterOptions.SearchOptions,
+        modelInfo?: any
     ): Record<string, any> {
         const filter = { ...baseFilter };
 
-        if (options.stringSearch) this.apply(filter, options.stringSearch, ConditionUtils.string);
-        if (options.rangeSearch) this.apply(filter, options.rangeSearch, ConditionUtils.range);
-        if (options.listSearch) this.apply(filter, options.listSearch, ConditionUtils.list);
+        if (options.stringSearch) this.apply(filter, options.stringSearch, ConditionUtils.string, modelInfo);
+        if (options.rangeSearch) this.apply(filter, options.rangeSearch, ConditionUtils.range, modelInfo);
+        if (options.listSearch) this.apply(filter, options.listSearch, ConditionUtils.list, modelInfo);
 
         return filter;
     }
@@ -49,6 +51,7 @@ export default class SearchBuilder {
      * @param filter - The filter object to modify
      * @param conditions - Array of search conditions to apply
      * @param buildCondition - Function to build the condition object from the search option
+     * @param modelInfo - Optional Prisma model information for relation detection
      * @private
      * 
      * @remarks
@@ -60,7 +63,8 @@ export default class SearchBuilder {
     private static apply<T extends { keys?: string[]; grouping?: "and" | "or" }>(
         filter: Record<string, any>,
         conditions: T[],
-        buildCondition: (opt: T) => any
+        buildCondition: (opt: T) => any,
+        modelInfo?: any
     ): void {
         const orPaths = new Set<string>();
 
@@ -75,12 +79,12 @@ export default class SearchBuilder {
                 filter.OR = filter.OR ?? [];
 
                 for (const path of keys) {
-                    filter.OR.push(ObjectUtils.build(path, condition));
+                    filter.OR.push(ObjectUtils.buildWithRelations(path, condition, modelInfo));
                     orPaths.add(path);
                 }
             } else {
                 for (const path of keys) {
-                    ObjectUtils.assign(filter, path, condition);
+                    ObjectUtils.assign(filter, path, condition, modelInfo);
                 }
             }
         }

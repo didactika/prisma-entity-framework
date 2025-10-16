@@ -126,7 +126,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
 
         if (longIndex === -1) {
             let whereClause = whereClauseBase;
-            if (options.search) whereClause = SearchUtils.applySearchFilter(whereClause, options.search);
+            if (options.search) whereClause = SearchUtils.applySearchFilter(whereClause, options.search, modelInfo);
 
             let take: number | undefined = options.pagination?.take;
             let skip: number | undefined = options.pagination?.skip;
@@ -171,7 +171,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                 if (searchClone?.listSearch?.[longIndex]) {
                     searchClone.listSearch[longIndex].values = chunkValues;
                 }
-                const whereClause = searchClone ? SearchUtils.applySearchFilter(whereClauseBase, searchClone) : whereClauseBase;
+                const whereClause = searchClone ? SearchUtils.applySearchFilter(whereClauseBase, searchClone, modelInfo) : whereClauseBase;
                 return entityModel.findMany({ where: whereClause, include }) as Promise<T[]>;
             });
 
@@ -320,6 +320,198 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             }
         }
         return totalCreated;
+    }
+
+    /**
+     * Upsert a single entity (update if exists with same unique fields, create otherwise)
+     * Verifies existence using unique constraints, checks for changes before updating
+     * 
+     * @param data - The entity data to upsert
+     * @param keyTransformTemplate - Optional function to transform relation names to FK field names
+     * @returns The upserted entity
+     * 
+     * @example
+     * ```typescript
+     * const user = await User.upsert({ email: 'john@example.com', name: 'John Doe' });
+     * // If user with email exists and has changes -> update
+     * // If user with email exists but no changes -> return existing
+     * // If user doesn't exist -> create
+     * ```
+     */
+    public static async upsert<T extends Record<string, any>>(
+        this: new (data: any) => BaseEntity<T>,
+        data: Partial<T>,
+        keyTransformTemplate: (relationName: string) => string = (key) => `${key}Id`
+    ): Promise<T> {
+        const entityModel = (this as any).model;
+        if (!entityModel) throw new Error("Model is not defined in the BaseEntity class.");
+
+        const modelName = entityModel.name;
+        const uniqueConstraints = ModelUtils.getUniqueConstraints(modelName);
+
+        if (!uniqueConstraints || uniqueConstraints.length === 0) {
+            throw new Error(`No unique constraints found for model ${modelName}. Cannot perform upsert.`);
+        }
+
+        // Process and normalize data
+        const clean = BaseEntity.sanitizeKeysRecursive(data);
+        const processed = DataUtils.processRelations(clean);
+        const normalized = DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
+
+        // Try to find existing record using unique constraints
+        let existingRecord: any = null;
+        for (const constraint of uniqueConstraints) {
+            const whereClause: Record<string, any> = {};
+            let hasAllFields = true;
+
+            for (const field of constraint) {
+                if (normalized[field] !== undefined && normalized[field] !== null) {
+                    whereClause[field] = normalized[field];
+                } else {
+                    hasAllFields = false;
+                    break;
+                }
+            }
+
+            if (hasAllFields && Object.keys(whereClause).length > 0) {
+                try {
+                    existingRecord = await entityModel.findFirst({ where: whereClause });
+                    if (existingRecord) break;
+                } catch (error) {
+                    // Continue to next constraint if this one fails
+                    continue;
+                }
+            }
+        }
+
+        if (existingRecord) {
+            // Check if there are any changes
+            const hasChanges = Object.keys(normalized).some(key => {
+                if (key === 'id') return false;
+                return normalized[key] !== existingRecord[key];
+            });
+
+            if (!hasChanges) {
+                // No changes, return existing record
+                return existingRecord;
+            }
+
+            // Has changes, perform update
+            const updated = await entityModel.update({
+                where: { id: existingRecord.id },
+                data: normalized
+            });
+            return updated;
+        }
+
+        // Record doesn't exist, create new
+        const created = await entityModel.create({ data: normalized });
+        return created;
+    }
+
+    /**
+     * Upsert multiple entities in batch (update if exists, create otherwise)
+     * For each item: verifies existence using unique constraints, checks for changes before updating
+     * 
+     * @param items - Array of entity data to upsert
+     * @param keyTransformTemplate - Optional function to transform relation names to FK field names
+     * @returns Object with counts of created, updated, and unchanged records
+     * 
+     * @example
+     * ```typescript
+     * const result = await User.upsertMany([
+     *   { email: 'john@example.com', name: 'John Doe' },
+     *   { email: 'jane@example.com', name: 'Jane Smith' }
+     * ]);
+     * // Returns: { created: 1, updated: 1, unchanged: 0, total: 2 }
+     * ```
+     */
+    public static async upsertMany<T extends Record<string, any>>(
+        this: new (data: any) => BaseEntity<T>,
+        items: Partial<T>[],
+        keyTransformTemplate: (relationName: string) => string = (key) => `${key}Id`
+    ): Promise<{ created: number; updated: number; unchanged: number; total: number }> {
+        const entityModel = (this as any).model;
+        if (!entityModel) throw new Error("Model is not defined in the BaseEntity class.");
+        if (!Array.isArray(items) || items.length === 0) {
+            return { created: 0, updated: 0, unchanged: 0, total: 0 };
+        }
+
+        const modelName = entityModel.name;
+        const uniqueConstraints = ModelUtils.getUniqueConstraints(modelName);
+
+        if (!uniqueConstraints || uniqueConstraints.length === 0) {
+            throw new Error(`No unique constraints found for model ${modelName}. Cannot perform upsert.`);
+        }
+
+        let created = 0;
+        let updated = 0;
+        let unchanged = 0;
+
+        // Process each item
+        for (const item of items) {
+            // Process and normalize data
+            const clean = BaseEntity.sanitizeKeysRecursive(item);
+            const processed = DataUtils.processRelations(clean);
+            const normalized = DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
+
+            // Try to find existing record using unique constraints
+            let existingRecord: any = null;
+            for (const constraint of uniqueConstraints) {
+                const whereClause: Record<string, any> = {};
+                let hasAllFields = true;
+
+                for (const field of constraint) {
+                    if (normalized[field] !== undefined && normalized[field] !== null) {
+                        whereClause[field] = normalized[field];
+                    } else {
+                        hasAllFields = false;
+                        break;
+                    }
+                }
+
+                if (hasAllFields && Object.keys(whereClause).length > 0) {
+                    try {
+                        existingRecord = await entityModel.findFirst({ where: whereClause });
+                        if (existingRecord) break;
+                    } catch (error) {
+                        // Continue to next constraint if this one fails
+                        continue;
+                    }
+                }
+            }
+
+            if (existingRecord) {
+                // Check if there are any changes
+                const hasChanges = Object.keys(normalized).some(key => {
+                    if (key === 'id') return false;
+                    return normalized[key] !== existingRecord[key];
+                });
+
+                if (!hasChanges) {
+                    // No changes
+                    unchanged++;
+                } else {
+                    // Has changes, perform update
+                    await entityModel.update({
+                        where: { id: existingRecord.id },
+                        data: normalized
+                    });
+                    updated++;
+                }
+            } else {
+                // Record doesn't exist, create new
+                await entityModel.create({ data: normalized });
+                created++;
+            }
+        }
+
+        return {
+            created,
+            updated,
+            unchanged,
+            total: items.length
+        };
     }
 
     /**
@@ -545,7 +737,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         }
 
         let whereClause = SearchUtils.applyDefaultFilters(filter, modelInfo);
-        if (options?.search) whereClause = SearchUtils.applySearchFilter(whereClause, options.search);
+        if (options?.search) whereClause = SearchUtils.applySearchFilter(whereClause, options.search, modelInfo);
         try {
             const result = await entityModel.deleteMany({
                 where: whereClause

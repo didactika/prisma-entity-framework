@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2025-10-16
+
+### Added
+- **Upsert Operations**: New `upsert()` and `upsertMany()` methods for smart create/update logic
+  - Automatically detects existing records using unique constraints from Prisma schema
+  - Only updates when actual changes are detected, avoiding unnecessary database writes
+  - `upsert(data)`: Returns the entity (created, updated, or unchanged)
+  - `upsertMany(items)`: Returns detailed statistics `{ created, updated, unchanged, total }`
+  - Supports composite unique constraints and partial updates
+  - Uses `ModelUtils.getUniqueConstraints()` for dynamic unique field detection
+  - Added `findFirst` mock support in test infrastructure
+  - 6 unit tests for upsert functionality
+  - 11 integration tests
+
+## [0.1.10] - 2025-10-16
+
+### Added
+- **Model-Aware Structure Building**: Enhanced `ObjectUtils` with Prisma relation awareness
+  - New `buildWithRelations()` method constructs proper Prisma filter structures with `is`/`some` wrappers
+  - Enhanced `assign()` method now accepts optional `modelInfo` parameter for relation-aware creation
+
+### Fixed
+- **Search with Nested Array Relations**: Fixed search query generation for deeply nested array relations
+  - Search paths like `posts.author.name` now correctly generate `{ posts: { some: { author: { is: { name: {...} } } } } }`
+  - Previously generated invalid structure: `{ posts: { author: { name: {...} } } }` causing "Unknown argument" errors
+  - Fixed for both AND and OR grouping in search conditions
+  - Resolves errors when searching on nested paths: array → single, array → array → single, etc.
+- **Filter Merge with Nested Relations**: Fixed `ObjectUtils.assign()` to correctly merge filters when the same relation appears in both base filters and string search
+
+### Changed
+- Updated `SearchBuilder.build()` and `apply()` to propagate `modelInfo` through the query building chain
+- Updated `BaseEntity.findByFilter()` to pass `modelInfo` to search filter operations
+- Enhanced `ObjectUtils.assign()` to create Prisma-compliant structures when modelInfo is provided
+
+### Tests
+- Added 3 unit tests for `ObjectUtils.assign()` with modelInfo parameter
+- Added 7 unit tests for `ObjectUtils.buildWithRelations()` method
+- Added 8 integration tests for search queries with nested array relations
+- Total: 18 new tests in v0.1.10, all 267 tests passing
+
+## [0.1.9] - 2025-10-16
+
+### Fixed
+- **Filter Merge with Nested Relations**: Fixed `ObjectUtils.assign()` to correctly merge filters when the same relation appears in both base filters and string search
+  - Now properly navigates into existing `is`/`some` wrappers instead of overwriting them
+  - Resolves "Unknown argument" errors when combining nested relation filters with search queries
+  - Example: `{ group: { is: {...} } }` + search on `group.course.name` now merges correctly
+  - Added 5 new tests (unit) for Prisma filter structure merging
+  - Added 3 new integration tests for real-world filter merge scenarios
+
+### Changed
+- Enhanced `ObjectUtils.assign()` to detect and merge with Prisma filter structures (`is`, `some`)
+- Improved handling of complex nested queries with mixed filters and searches
+
 ## [0.1.8] - 2025-10-15
 
 ### Fixed

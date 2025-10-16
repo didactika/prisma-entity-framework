@@ -16,6 +16,7 @@ export default  class SearchUtils {
      * 
      * @param baseFilter - The base filter object to extend
      * @param searchOptions - Search options with string, range, and list searches
+     * @param modelInfo - Optional Prisma model information for relation detection
      * @returns Combined filter with search conditions applied
      * 
      * @remarks
@@ -34,9 +35,10 @@ export default  class SearchUtils {
      */
     public static applySearchFilter(
         baseFilter: Record<string, any>,
-        searchOptions: FindByFilterOptions.SearchOptions
+        searchOptions: FindByFilterOptions.SearchOptions,
+        modelInfo?: any
     ): Record<string, any> {
-        return SearchBuilder.build(baseFilter, searchOptions);
+        return SearchBuilder.build(baseFilter, searchOptions, modelInfo);
     }
 
     /**
