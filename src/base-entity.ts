@@ -563,10 +563,66 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         const { model } = this.constructor as any;
         const cleanData = BaseEntity.sanitizeKeysRecursive(data);
         const processedData = DataUtils.processRelations(cleanData);
-        const updatedEntity = await model.update({ where: { id }, data: processedData });
+        const normalized = DataUtils.normalizeRelationsToFK(processedData, (k) => `${k}Id`);
+        const pruned = BaseEntity.pruneUpdatePayload(normalized);
+        const updatedEntity = await model.update({ where: { id }, data: pruned });
         this.assignProperties(updatedEntity);
         return updatedEntity;
     }
+
+    private static pruneUpdatePayload(obj: Record<string, any>): Record<string, any> {
+        const out: Record<string, any> = {};
+        
+        for (const [k, v] of Object.entries(obj)) {
+            if (this.shouldSkipField(k, v)) continue;
+            out[k] = v;
+        }
+        
+        // Remove relation objects if their FK field exists
+        this.removeRelationObjectsWithFK(out);
+        
+        return out;
+    }
+
+    private static shouldSkipField(key: string, value: any): boolean {
+        // Skip createdAt always
+        if (key === 'createdAt') return true;
+        
+        // Skip updatedAt if it's undefined or an object (Prisma operation)
+        if (key === 'updatedAt' && (value === undefined || typeof value === 'object')) return true;
+        
+        // Skip empty objects
+        if (this.isEmptyObject(value)) return true;
+        
+        // Skip objects that have Prisma operation keys
+        if (this.hasPrismaOperations(value)) return true;
+        
+        return false;
+    }
+
+    private static isEmptyObject(value: any): boolean {
+        return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0;
+    }
+
+    private static hasPrismaOperations(value: any): boolean {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+        
+        const prismaOperationKeys = new Set(['connect', 'create', 'update', 'delete', 'disconnect', 'set', 'upsert', 'connectOrCreate']);
+        return Object.keys(value).some(key => prismaOperationKeys.has(key));
+    }
+
+    private static removeRelationObjectsWithFK(obj: Record<string, any>): void {
+        for (const key of Object.keys(obj)) {
+            if (key.endsWith('Id')) {
+                const rel = key.slice(0, -2);
+                if (rel in obj) {
+                    delete obj[rel];
+                }
+            }
+        }
+    }
+
+
 
     public static async updateManyById(
         this: new (data: any) => BaseEntity<any>,

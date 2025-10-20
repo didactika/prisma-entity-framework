@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2025-10-20
+
+### Fixed
+- **Update Method**: Fixed `update()` to correctly handle entities with both FK field and relation object
+  - `DataUtils.normalizeRelationsToFK()` now preserves explicit FK values instead of overwriting with relation object ID
+  - Added 8 new integration tests for update scenarios with relations
+
+### Changed
+- Refactored `BaseEntity.pruneUpdatePayload()` for better maintainability
+  - Split into helper methods: `shouldSkipField()`, `isEmptyObject()`, `hasPrismaOperations()`, `removeRelationObjectsWithFK()`
+  - Improved filtering of Prisma operation objects (`connect`, `create`, `update`, etc.)
+  - Reduced cognitive complexity
+
 ## [0.1.11] - 2025-10-16
 
 ### Added

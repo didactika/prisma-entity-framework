@@ -1,6 +1,6 @@
 {
   "name": "prisma-entity-framework",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "TypeScript Entity Framework for Prisma ORM with Active Record pattern, fluent query builder, relation graphs, batch operations, advanced CRUD, search filters, and pagination utilities.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

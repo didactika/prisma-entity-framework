@@ -63,7 +63,10 @@ export default class DataUtils {
                 'id' in value.connect
             ) {
                 const newKey = keyTransformTemplate(key);
-                flatData[newKey] = value.connect.id;
+                // Only set the FK if it doesn't already exist (FK takes precedence)
+                if (!(newKey in flatData)) {
+                    flatData[newKey] = value.connect.id;
+                }
                 delete flatData[key];
             }
         }

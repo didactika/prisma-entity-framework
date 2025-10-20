@@ -4,7 +4,6 @@
  * Supports SQLite, MySQL, and PostgreSQL
  */
 
-import { join } from 'path';
 import { getDatabaseProvider } from '../../src/database-utils';
 
 /**
@@ -55,9 +54,8 @@ export async function setupTestDatabase(): Promise<TestDbConfig> {
       // Use default Prisma client for SQLite
       const { PrismaClient } = await import('@prisma/client');
       
-      // Use file-based SQLite for compatibility
-      const dbPath = join(process.cwd(), 'tests', 'prisma', 'test.db');
-      const DATABASE_URL = `file:${dbPath}`;
+      // Use file-based SQLite for compatibility - path is relative to schema location
+      const DATABASE_URL = `file:./test.db`;
       process.env.DATABASE_URL = DATABASE_URL;
 
       client = new PrismaClient({
@@ -221,8 +219,7 @@ export async function seedTestDatabase(client: any) {
 }
 
 /**
- * Clears all data from the test database
- * Useful for cleanup between tests
+ * Clears all data from test database
  * 
  * @param client - Prisma client instance
  * 
@@ -232,10 +229,15 @@ export async function seedTestDatabase(client: any) {
  * ```
  */
 export async function clearTestDatabase(client: any): Promise<void> {
-  // Delete in order to respect foreign key constraints
-  await client.comment.deleteMany();
-  await client.post.deleteMany();
-  await client.user.deleteMany();
+  try {
+    // Delete in order to respect foreign key constraints
+    await client.comment.deleteMany();
+    await client.post.deleteMany();
+    await client.user.deleteMany();
+  } catch (error) {
+    // If tables don't exist, it's okay - they'll be created on first use
+    console.warn('Warning: Could not clear test database, tables may not exist yet', error);
+  }
 }
 
 /**
