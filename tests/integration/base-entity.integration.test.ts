@@ -110,6 +110,250 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
       expect(dbUser?.name).toBe('Updated');
     });
+
+    /**
+     * Test: should handle update after findByFilter with relations
+     * This reproduces the bug: findByFilter with relationsToInclude, then update
+     */
+    it('should update after findByFilter with relations included', async () => {
+      // Create user first
+      const created = await prisma.user.create({
+        data: { name: 'John', email: 'john@example.com', age: 30 }
+      });
+
+      // Create a post for the user
+      const postResult = await prisma.post.create({
+        data: {
+          title: 'Test Post',
+          content: 'Content',
+          published: true,
+          authorId: created.id
+        }
+      });
+      expect(postResult).toBeDefined();
+
+      // Find user with relations (simulating the bug scenario)
+      const found = await User.findByFilter(
+        { email: 'john@example.com' },
+        { 
+          onlyOne: true,
+          relationsToInclude: [{ posts: [] }]
+        }
+      ) as any;
+
+      expect(found).not.toBeNull();
+      expect(found.posts).toBeDefined();
+      expect(Array.isArray(found.posts)).toBe(true);
+
+      // Create entity instance from found data
+      const userToUpdate = new User(found);
+      
+      // Update a field
+      userToUpdate.age = 31;
+      
+      // This should work without errors
+      const updated = await userToUpdate.update();
+
+      expect(updated.age).toBe(31);
+      expect(updated.name).toBe('John');
+
+      // Verify in database
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      expect(dbUser?.age).toBe(31);
+    });
+
+    /**
+     * Test: should handle update with nested relation object in data
+     */
+    it('should update when entity has relation object', async () => {
+      // Create user first
+      const created = await prisma.user.create({
+        data: { name: 'Jane', email: 'jane@example.com', age: 25 }
+      });
+
+      // Create post for user
+      const createdUserPost = await prisma.post.create({
+        data: {
+          title: 'Jane Post',
+          content: 'Content',
+          published: true,
+          authorId: created.id
+        }
+      });
+      expect(createdUserPost).toBeDefined();
+
+      // Find user with posts relation
+      const found = await User.findByFilter(
+        { id: created.id },
+        { 
+          onlyOne: true,
+          relationsToInclude: [{ posts: [] }]
+        }
+      ) as any;
+
+      // Create entity with relation data
+      const userEntity = new User({
+        id: found.id,
+        name: found.name,
+        email: found.email,
+        age: found.age,
+        posts: found.posts // This should be filtered out in update
+      } as any);
+
+      // Update a field
+      userEntity.name = 'Jane Updated';
+
+      // Should not fail with "Unknown argument `posts`"
+      const updated = await userEntity.update();
+
+      expect(updated.name).toBe('Jane Updated');
+
+      // Verify in database
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      expect(dbUser?.name).toBe('Jane Updated');
+    });
+
+    /**
+     * Test: should handle update with FK field when relation object exists
+     */
+    it('should prefer FK field over relation object', async () => {
+      // This test ensures that if both authorId and author exist,
+      // the FK field is used and the relation object is removed
+      
+      const user1 = await prisma.user.create({
+        data: { name: 'Author 1', email: 'author1@example.com' }
+      });
+
+      const user2 = await prisma.user.create({
+        data: { name: 'Author 2', email: 'author2@example.com' }
+      });
+
+      const createdPost = await prisma.post.create({
+        data: {
+          title: 'Original Post',
+          content: 'Content',
+          published: true,
+          authorId: user1.id
+        }
+      });
+
+      // Find post with author relation
+      const foundPost = await prisma.post.findUnique({
+        where: { id: createdPost.id },
+        include: { author: true }
+      });
+
+      // Simulate entity with both authorId and author object
+      const postData: any = {
+        id: foundPost!.id,
+        title: 'Updated Post',
+        content: foundPost!.content,
+        published: foundPost!.published,
+        authorId: user2.id, // Change to user2
+        author: foundPost!.author // Has user1 data
+      };
+
+      // Mock entity class for Post
+      class Post extends BaseEntity<any> {
+        static readonly model = prisma.post;
+        
+        declare title: string;
+        declare content: string;
+        declare published: boolean;
+        declare authorId: number;
+
+        constructor(data?: any) {
+          super(data);
+        }
+      }
+
+      const postEntity = new Post(postData);
+      const updated = await postEntity.update();
+
+      // Should use authorId (user2), not the author object (user1)
+      expect(updated.authorId).toBe(user2.id);
+
+      // Verify in database
+      const dbPost = await prisma.post.findUnique({ where: { id: createdPost.id } });
+      expect(dbPost?.authorId).toBe(user2.id);
+      expect(dbPost?.title).toBe('Updated Post');
+    });
+
+    /**
+     * Test: should not include createdAt in update
+     */
+    it('should not update createdAt field', async () => {
+      const user = new User({ name: 'TestUser', email: 'test@example.com' });
+      const created = await user.create();
+      const originalCreatedAt = (created as any).createdAt;
+
+      // Wait a bit to ensure time difference
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Try to update with createdAt
+      const userToUpdate = new User({
+        id: created.id,
+        name: 'Updated User',
+        email: 'test@example.com',
+        createdAt: new Date() // This should be ignored
+      } as any);
+
+      await userToUpdate.update();
+
+      // Verify createdAt didn't change
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      expect((dbUser as any)?.createdAt.getTime()).toBe(originalCreatedAt.getTime());
+      expect(dbUser?.name).toBe('Updated User');
+    });
+
+    /**
+     * Test: should handle updatedAt correctly
+     */
+    it('should handle updatedAt field', async () => {
+      const user = new User({ name: 'TestUser', email: 'test2@example.com' });
+      const created = await user.create();
+      const originalUpdatedAt = (created as any).updatedAt;
+
+      // Wait to ensure timestamp difference
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const userToUpdate = new User({
+        id: created.id,
+        name: 'Updated User',
+        email: 'test2@example.com'
+      });
+
+      await userToUpdate.update();
+
+      // Verify updatedAt was updated by database
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      expect((dbUser as any)?.updatedAt.getTime()).toBeGreaterThanOrEqual(originalUpdatedAt.getTime());
+      expect(dbUser?.name).toBe('Updated User');
+    });
+
+    /**
+     * Test: should not fail when entity has object-type fields with create/update syntax
+     */
+    it('should filter out Prisma operation objects', async () => {
+      const user = new User({ name: 'TestUser', email: 'test3@example.com' });
+      const created = await user.create();
+
+      // Simulate entity with Prisma operation objects (like from findByFilter)
+      const userWithOperations: any = {
+        id: created.id,
+        name: 'Updated',
+        email: 'test3@example.com',
+        createdAt: { create: {} }, // Prisma operation object
+        updatedAt: { create: {} }  // Prisma operation object
+      };
+
+      const userToUpdate = new User(userWithOperations);
+      
+      // Should not fail with "Invalid invocation" error
+      const updated = await userToUpdate.update();
+
+      expect(updated.name).toBe('Updated');
+    });
   });
 
   describe('delete', () => {

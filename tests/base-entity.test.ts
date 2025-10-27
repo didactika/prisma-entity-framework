@@ -145,6 +145,88 @@ describe('BaseEntity', () => {
       await user.update();
       expect(mockPrismaClient.user.update).toHaveBeenCalled();
     });
+
+    /**
+     * Test: should exclude createdAt from update payload
+     */
+    it('should exclude createdAt from update payload', async () => {
+      const now = new Date();
+      const user = new User({ 
+        id: 1, 
+        name: 'Updated Name', 
+        email: 'updated@example.com',
+      });
+      (user as any).createdAt = now;
+
+      const updateSpy = jest.spyOn(mockPrismaClient.user, 'update').mockResolvedValueOnce({
+        id: 1,
+        name: 'Updated Name',
+        email: 'updated@example.com',
+        age: 30,
+        isActive: true,
+        createdAt: now,
+        updatedAt: new Date(),
+      });
+
+      await user.update();
+      
+      const callArgs = updateSpy.mock.calls[0][0];
+      expect(callArgs.data).not.toHaveProperty('createdAt');
+    });
+
+    /**
+     * Test: should exclude updatedAt object from update payload
+     */
+    it('should exclude updatedAt object from update payload', async () => {
+      const user = new User({ 
+        id: 1, 
+        name: 'Updated Name', 
+        email: 'updated@example.com'
+      });
+      (user as any).updatedAt = { create: {} };
+
+      const updateSpy = jest.spyOn(mockPrismaClient.user, 'update').mockResolvedValueOnce({
+        id: 1,
+        name: 'Updated Name',
+        email: 'updated@example.com',
+        age: 30,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      await user.update();
+      
+      const callArgs = updateSpy.mock.calls[0][0];
+      expect(callArgs.data).not.toHaveProperty('updatedAt');
+    });
+
+    /**
+     * Test: should exclude empty objects from update payload
+     */
+    it('should exclude empty objects from update payload', async () => {
+      const user = new User({ 
+        id: 1, 
+        name: 'Updated Name', 
+        email: 'updated@example.com'
+      });
+      (user as any).emptyField = {};
+
+      const updateSpy = jest.spyOn(mockPrismaClient.user, 'update').mockResolvedValueOnce({
+        id: 1,
+        name: 'Updated Name',
+        email: 'updated@example.com',
+        age: 30,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      await user.update();
+      
+      const callArgs = updateSpy.mock.calls[0][0];
+      expect(callArgs.data).not.toHaveProperty('emptyField');
+    });
   });
 
   describe('delete', () => {

@@ -6,6 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## [0.1.13] - 2025-01-27
+
+### Added
+- **JSON Field Support**: Full support for JSON/JSONB fields in all database operations
+  - JSON fields are now preserved as-is without being wrapped in `connect`/`create` structures
+  - Automatic detection of JSON fields using Prisma model metadata
+  - PostgreSQL-specific JSONB casting in batch update queries
+  - 13 comprehensive integration tests for JSON field operations in PostgreSQL
+  - New `Product` model in test schemas with `metadata` and `settings` JSON fields
+
+### Changed
+- **Optimized Batch Upsert Performance**: Major performance improvements in `upsertMany()`
+  - Changed from N individual queries to 1 batch query using `findMany({ OR: [...] })`
+  - Batch comparison of changes in memory instead of individual checks
+  - Batch operations: `createMany` + `updateManyById` instead of N individual operations
+  - Performance improvement: from N+M queries to 2-3 queries total
+  - Added `hasChanges()` and `getChangedFields()` helper methods for efficient change detection
+  - Only compares fields present in new data (ignores extra fields in existing records)
+
+- **Enhanced Data Processing**:
+  - `DataUtils.processRelations()` now accepts optional `modelInfo` parameter
+  - Detects JSON fields (`type: 'Json'` or `type: 'Bytes'`) and preserves them without relation processing
+  - All entity methods now pass `modelInfo` to `processRelations()`: `create()`, `update()`, `createMany()`, `upsert()`, `upsertMany()`, `updateManyById()`
+
+- **Improved Batch Updates**:
+  - `prepareUpdateList()` now allows JSON objects in update payloads
+  - `escapeValue()` properly serializes JSON objects to strings
+  - `buildUpdateQuery()` adds PostgreSQL-specific `::jsonb` casting for JSON fields
+  - Fixed table name resolution with multiple fallbacks: `dbName` → `name` → `model.name`
+
+### Fixed
+- Fixed JSON fields being incorrectly filtered out in batch update operations
+- Fixed JSON objects being converted to `[object Object]` in SQL queries
+- Fixed `update()` method not passing `modelInfo` to `processRelations()` after merge
+
+### Tests
+- Added 13 integration tests for JSON field operations (create, update, upsert, upsertMany, createMany)
+- Added 3 unit tests for JSON field preservation in `DataUtils`
+- All 309 tests passing across SQLite, MySQL, and PostgreSQL
+
+
+## [0.1.12] - 2025-10-20
+
+### Fixed
+- **Update Method**: Fixed `update()` to correctly handle entities with both FK field and relation object
+  - `DataUtils.normalizeRelationsToFK()` now preserves explicit FK values instead of overwriting with relation object ID
+  - Added 8 new integration tests for update scenarios with relations
+
+### Changed
+- Refactored `BaseEntity.pruneUpdatePayload()` for better maintainability
+  - Split into helper methods: `shouldSkipField()`, `isEmptyObject()`, `hasPrismaOperations()`, `removeRelationObjectsWithFK()`
+  - Improved filtering of Prisma operation objects (`connect`, `create`, `update`, etc.)
+  - Reduced cognitive complexity
 
 ## [0.1.11] - 2025-10-16
 
