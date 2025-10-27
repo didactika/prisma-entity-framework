@@ -37,6 +37,19 @@ class User extends BaseEntity<IUser> implements IUser {
     super(data);
   }
 
+  static override getModelInformation() {
+    return {
+      name: 'user',
+      dbName: 'users',
+      fields: [
+        { name: 'id', dbName: 'id', kind: 'scalar' },
+        { name: 'name', dbName: 'name', kind: 'scalar' },
+        { name: 'email', dbName: 'email', kind: 'scalar' },
+        { name: 'age', dbName: 'age', kind: 'scalar' },
+      ]
+    };
+  }
+
   get name(): string {
     return this._name!;
   }
@@ -131,13 +144,17 @@ describe('BaseEntity - Upsert', () => {
         { email: 'same@example.com', name: 'Same Name' }
       ];
 
-      mockPrismaClient.user.findFirst
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ id: 2, email: 'update@example.com', name: 'Old Name' })
-        .mockResolvedValueOnce({ id: 3, email: 'same@example.com', name: 'Same Name' });
+      // Mock findMany to return existing records (batch query)
+      mockPrismaClient.user.findMany.mockResolvedValue([
+        { id: 2, email: 'update@example.com', name: 'Old Name' },
+        { id: 3, email: 'same@example.com', name: 'Same Name' }
+      ]);
 
-      mockPrismaClient.user.create.mockResolvedValue({ id: 1, email: 'new@example.com', name: 'New User' });
-      mockPrismaClient.user.update.mockResolvedValue({ id: 2, email: 'update@example.com', name: 'Updated Name' });
+      // Mock createMany for new records
+      mockPrismaClient.user.createMany.mockResolvedValue({ count: 1 });
+
+      // Mock updateManyById (raw query) for updates
+      mockPrismaClient.$executeRawUnsafe.mockResolvedValue(1);
 
       const result = await User.upsertMany(items);
 
@@ -155,10 +172,11 @@ describe('BaseEntity - Upsert', () => {
         { email: 'user2@example.com', name: 'User 2' }
       ];
 
-      mockPrismaClient.user.findFirst.mockResolvedValue(null);
-      mockPrismaClient.user.create
-        .mockResolvedValueOnce({ id: 1, ...items[0] })
-        .mockResolvedValueOnce({ id: 2, ...items[1] });
+      // Mock findMany to return no existing records
+      mockPrismaClient.user.findMany.mockResolvedValue([]);
+      
+      // Mock createMany
+      mockPrismaClient.user.createMany.mockResolvedValue({ count: 2 });
 
       const result = await User.upsertMany(items);
 

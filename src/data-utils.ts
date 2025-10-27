@@ -5,16 +5,35 @@ export default class DataUtils {
     /**
      * Processes relational data by transforming nested objects and arrays into Prisma-compatible formats.
      * Converts objects into `connect` or `create` structures for relational integrity.
+     * JSON fields are preserved as-is without wrapping in connect/create.
      * @param data The original data object containing relations.
+     * @param modelInfo Optional model information to detect JSON fields
      * @returns A transformed object formatted for Prisma operations.
      */
-    public static processRelations(data: Record<string, any>): Record<string, any> {
+    public static processRelations(data: Record<string, any>, modelInfo?: any): Record<string, any> {
         const processedData = { ...data };
+
+        // Build a set of JSON field names for quick lookup
+        const jsonFields = new Set<string>();
+        if (modelInfo?.fields) {
+            for (const field of modelInfo.fields) {
+                if (field.kind === 'scalar' && (field.type === 'Json' || field.type === 'Bytes')) {
+                    jsonFields.add(field.name);
+                }
+            }
+        }
 
         for (const key of Object.keys(data)) {
             const value = data[key];
 
             if (!this.isObject(value)) continue;
+
+            // Skip processing if this is a JSON field
+            if (jsonFields.has(key)) {
+                // Keep JSON fields as-is
+                processedData[key] = value;
+                continue;
+            }
 
             if (Array.isArray(value)) {
                 const relationArray = this.processRelationArray(value);

@@ -49,3 +49,13 @@ model Comment {
   @@index([postId])
   @@index([authorId])
 }
+
+model Product {
+  id          Int      @id @default(autoincrement())
+  name        String
+  sku         String   @unique
+  metadata    Json?
+  settings    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

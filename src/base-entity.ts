@@ -249,8 +249,16 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
     async create(): Promise<TModel> {
         const { model } = this.constructor as any;
         if (!model) throw new Error("Model is not defined in the BaseEntity class.");
+
+        let modelInfo: any = null;
+        try {
+            modelInfo = (this.constructor as any).getModelInformation();
+        } catch (error) {
+            // Model info not available, continue without it
+        }
+
         const rawData = BaseEntity.sanitizeKeysRecursive(this);
-        const data = DataUtils.processRelations(rawData);
+        const data = DataUtils.processRelations(rawData, modelInfo);
         if (!data || Object.keys(data).length === 0)
             throw new Error("Cannot create: no data provided.");
         const created = await model.create({ data });
@@ -273,10 +281,17 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         const provider = getDatabaseProvider(prisma);
         const supportsSkipDuplicates = provider !== 'sqlite';
 
+        let modelInfo: any = null;
+        try {
+            modelInfo = (this as any).getModelInformation();
+        } catch (error) {
+            // Model info not available, continue without it
+        }
+
         let totalCreated = 0;
         const processedData = items.map(item => {
             const clean = BaseEntity.sanitizeKeysRecursive(item);
-            const processed = DataUtils.processRelations(clean);
+            const processed = DataUtils.processRelations(clean, modelInfo);
             return DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
         });
 
@@ -353,9 +368,16 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             throw new Error(`No unique constraints found for model ${modelName}. Cannot perform upsert.`);
         }
 
+        let modelInfo: any = null;
+        try {
+            modelInfo = (this as any).getModelInformation();
+        } catch (error) {
+            // Model info not available, continue without it
+        }
+
         // Process and normalize data
         const clean = BaseEntity.sanitizeKeysRecursive(data);
-        const processed = DataUtils.processRelations(clean);
+        const processed = DataUtils.processRelations(clean, modelInfo);
         const normalized = DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
 
         // Try to find existing record using unique constraints
@@ -411,7 +433,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
 
     /**
      * Upsert multiple entities in batch (update if exists, create otherwise)
-     * For each item: verifies existence using unique constraints, checks for changes before updating
+     * Optimized version that fetches all existing records in batch and compares changes efficiently
      * 
      * @param items - Array of entity data to upsert
      * @param keyTransformTemplate - Optional function to transform relation names to FK field names
@@ -444,19 +466,25 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             throw new Error(`No unique constraints found for model ${modelName}. Cannot perform upsert.`);
         }
 
-        let created = 0;
-        let updated = 0;
-        let unchanged = 0;
+        let modelInfo: any = null;
+        try {
+            modelInfo = (this as any).getModelInformation();
+        } catch (error) {
+            // Model info not available, continue without it
+        }
 
-        // Process each item
-        for (const item of items) {
-            // Process and normalize data
+        // Process and normalize all items
+        const normalizedItems = items.map(item => {
             const clean = BaseEntity.sanitizeKeysRecursive(item);
-            const processed = DataUtils.processRelations(clean);
-            const normalized = DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
+            const processed = DataUtils.processRelations(clean, modelInfo);
+            return DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
+        });
 
-            // Try to find existing record using unique constraints
-            let existingRecord: any = null;
+        // Build batch query to fetch all existing records
+        const orConditions: any[] = [];
+        const itemConstraintMap = new Map<number, any[]>(); // Maps item index to its constraint values
+
+        normalizedItems.forEach((normalized, index) => {
             for (const constraint of uniqueConstraints) {
                 const whereClause: Record<string, any> = {};
                 let hasAllFields = true;
@@ -471,38 +499,120 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                 }
 
                 if (hasAllFields && Object.keys(whereClause).length > 0) {
-                    try {
-                        existingRecord = await entityModel.findFirst({ where: whereClause });
-                        if (existingRecord) break;
-                    } catch (error) {
-                        // Continue to next constraint if this one fails
-                        continue;
+                    orConditions.push(whereClause);
+                    if (!itemConstraintMap.has(index)) {
+                        itemConstraintMap.set(index, []);
                     }
+                    itemConstraintMap.get(index)!.push(whereClause);
+                    break; // Use first valid constraint for this item
+                }
+            }
+        });
+
+        // Fetch all existing records in one query
+        let existingRecords: T[] = [];
+        if (orConditions.length > 0) {
+            try {
+                existingRecords = await entityModel.findMany({
+                    where: { OR: orConditions }
+                });
+            } catch (error) {
+                console.warn(`Warning: Could not fetch existing records in batch: ${(error as Error).message}`);
+            }
+        }
+
+        // Create a map for quick lookup of existing records
+        const existingMap = new Map<string, T>();
+        existingRecords.forEach(record => {
+            for (const constraint of uniqueConstraints) {
+                const key = constraint.map(field => `${field}:${(record as any)[field]}`).join('|');
+                existingMap.set(key, record);
+            }
+        });
+
+        // Categorize items: to create, to update, unchanged
+        const toCreate: any[] = [];
+        const toUpdate: Array<{ id: number; data: any }> = [];
+        let unchanged = 0;
+
+        normalizedItems.forEach((normalized, index) => {
+            const constraints = itemConstraintMap.get(index);
+            let existingRecord: T | undefined;
+
+            // Find matching existing record
+            if (constraints) {
+                for (const constraint of constraints) {
+                    const key = Object.keys(constraint)
+                        .map(field => `${field}:${constraint[field]}`)
+                        .join('|');
+                    existingRecord = existingMap.get(key);
+                    if (existingRecord) break;
                 }
             }
 
             if (existingRecord) {
-                // Check if there are any changes
-                const hasChanges = Object.keys(normalized).some(key => {
-                    if (key === 'id') return false;
-                    return normalized[key] !== existingRecord[key];
-                });
-
-                if (!hasChanges) {
-                    // No changes
-                    unchanged++;
-                } else {
-                    // Has changes, perform update
-                    await entityModel.update({
-                        where: { id: existingRecord.id },
+                // Check if there are changes using optimized comparison
+                if (BaseEntity.hasChanges(normalized, existingRecord)) {
+                    toUpdate.push({
+                        id: (existingRecord as any).id,
                         data: normalized
                     });
-                    updated++;
+                } else {
+                    unchanged++;
                 }
             } else {
-                // Record doesn't exist, create new
-                await entityModel.create({ data: normalized });
-                created++;
+                toCreate.push(normalized);
+            }
+        });
+
+        // Execute batch operations
+        let created = 0;
+        let updated = 0;
+
+        // Batch create
+        if (toCreate.length > 0) {
+            // Check if database supports skipDuplicates (SQLite doesn't)
+            const prisma = getPrismaInstance();
+            const provider = getDatabaseProvider(prisma);
+            const supportsSkipDuplicates = provider !== 'sqlite';
+
+            try {
+                const options: any = { data: toCreate };
+                if (supportsSkipDuplicates) {
+                    options.skipDuplicates = true;
+                }
+                const result = await entityModel.createMany(options);
+                created = result.count;
+            } catch (error) {
+                console.error(`Error in batch create: ${(error as Error).message}`);
+                // Fallback to individual creates
+                for (const data of toCreate) {
+                    try {
+                        await entityModel.create({ data });
+                        created++;
+                    } catch (err) {
+                        console.error(`Failed to create individual record: ${(err as Error).message}`);
+                    }
+                }
+            }
+        }
+
+        // Batch update using updateManyById
+        if (toUpdate.length > 0) {
+            try {
+                const updateData = toUpdate.map(({ id, data }) => ({ id, ...data }));
+                updated = await (this as any).updateManyById(updateData);
+            } catch (error) {
+                console.error(`Error in batch update: ${(error as Error).message}`);
+                // Fallback to individual updates
+                for (const { id, data } of toUpdate) {
+                    try {
+                        await entityModel.update({ where: { id }, data });
+                        updated++;
+                    } catch (err) {
+                        console.error(`Failed to update record ${id}: ${(err as Error).message}`);
+                    }
+                }
             }
         }
 
@@ -512,6 +622,64 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             unchanged,
             total: items.length
         };
+    }
+
+    /**
+     * Checks if there are changes between new data and existing data
+     * @param newData - new data
+     * @param existingData - existing data
+     * @returns true if there are changes, false otherwise
+     */
+    protected static hasChanges<T extends Record<string, any>>(newData: T, existingData: T): boolean {
+        return Object.keys(BaseEntity.getChangedFields(newData, existingData)).length > 0;
+    }
+
+    /**
+     * Returns a partial object with the fields that changed between newData and existingData.
+     * Only compares fields that are present in newData (ignores extra fields in existingData)
+     * @param newData - new data
+     * @param existingData - existing data
+     * @returns partial object containing only differing fields (includes id when applicable)
+     */
+    private static getChangedFields<T extends Record<string, any>>(newData: T, existingData: T): Partial<T> {
+        const IGNORED_KEYS = new Set(['id', 'createdAt', 'updatedAt', 'siteUuid']);
+        const changed: any = {};
+
+        // Only check keys that exist in newData (ignore extra fields in existingData)
+        const keys = Object.keys(newData);
+
+        for (const key of keys) {
+            if (IGNORED_KEYS.has(key)) continue;
+
+            const a = BaseEntity.normalizeValue((newData as any)[key]);
+            const b = BaseEntity.normalizeValue((existingData as any)[key]);
+            const isObjA = typeof a === 'object' && a !== null;
+            const isObjB = typeof b === 'object' && b !== null;
+
+            let diff = false;
+            if (isObjA || isObjB) {
+                diff = JSON.stringify(a) !== JSON.stringify(b);
+            } else {
+                diff = a !== b;
+            }
+
+            if (diff) changed[key] = (newData as any)[key];
+        }
+
+        if (Object.keys(changed).length > 0) {
+            if ((existingData as any).id !== undefined) changed.id = (existingData as any).id;
+        }
+
+        return changed as Partial<T>;
+    }
+
+    /**
+     * Normalizes a value for comparison (handles null, undefined, empty strings, etc.)
+     */
+    private static normalizeValue(value: any): any {
+        if (value === null || value === undefined || value === '') return null;
+        if (typeof value === 'string') return value.trim();
+        return value;
     }
 
     /**
@@ -561,8 +729,16 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         }
         const { id, ...data } = this as any;
         const { model } = this.constructor as any;
+
+        let modelInfo: any = null;
+        try {
+            modelInfo = (this.constructor as any).getModelInformation();
+        } catch (error) {
+            // Model info not available, continue without it
+        }
+
         const cleanData = BaseEntity.sanitizeKeysRecursive(data);
-        const processedData = DataUtils.processRelations(cleanData);
+        const processedData = DataUtils.processRelations(cleanData, modelInfo);
         const updatedEntity = await model.update({ where: { id }, data: processedData });
         this.assignProperties(updatedEntity);
         return updatedEntity;
@@ -575,8 +751,13 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         if (!Array.isArray(dataList) || dataList.length === 0) return 0;
         const prisma = getPrismaInstance();
         const modelInfo = (this as any).getModelInformation();
-        const tableName = modelInfo.dbName;
-        const formattedList = BaseEntity.prepareUpdateList(dataList);
+        const tableName = modelInfo.dbName || modelInfo.name || (this as any).model?.name;
+
+        if (!tableName) {
+            throw new Error("Could not determine table name for updateManyById");
+        }
+
+        const formattedList = BaseEntity.prepareUpdateList(dataList, modelInfo);
         let totalUpdated = 0;
         for (let i = 0; i < formattedList.length; i += BaseEntity.BATCH_SIZE) {
             const batch = formattedList.slice(i, i + BaseEntity.BATCH_SIZE);
@@ -593,17 +774,30 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         return totalUpdated;
     }
 
-    private static prepareUpdateList(dataList: Array<Partial<any>>): Array<Record<string, any>> {
+    private static prepareUpdateList(dataList: Array<Partial<any>>, modelInfo?: any): Array<Record<string, any>> {
+        // Build a set of JSON field names for quick lookup
+        const jsonFields = new Set<string>();
+        if (modelInfo?.fields) {
+            for (const field of modelInfo.fields) {
+                if (field.kind === 'scalar' && (field.type === 'Json' || field.type === 'Bytes')) {
+                    jsonFields.add(field.name);
+                }
+            }
+        }
+
         return BaseEntity.sanitizeKeysRecursive(dataList)
             .filter((item: any) => item.id !== undefined && item.id !== null)
             .map((item: any) => {
-                const processed = DataUtils.processRelations(item);
+                const processed = DataUtils.processRelations(item, modelInfo);
                 return Object.fromEntries(
                     Object.entries(processed).filter(([key, val]) => {
                         if (key === 'id') return true;
                         if (val === undefined) return false;
                         if (val === null) return true;
                         if (Array.isArray(val)) return true;
+                        // Allow JSON fields (plain objects)
+                        if (jsonFields.has(key) && typeof val === 'object') return true;
+                        // Filter out other objects (relations)
                         return typeof val !== 'object';
                     })
                 );
@@ -641,6 +835,13 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             return `'${escapedElements.join(',')}'`;
         }
 
+        // Handle JSON objects
+        if (typeof value === 'object') {
+            const jsonString = JSON.stringify(value);
+            const escaped = jsonString.replace(/'/g, "''").replace(/\\/g, '\\\\');
+            return `'${escaped}'`;
+        }
+
         return `'${String(value).replace(/'/g, "''").replace(/\\/g, '\\\\')}'`;
     }
 
@@ -658,10 +859,15 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         const fieldsToUpdate = new Set<string>();
 
         const fieldMap: Record<string, string> = {};
+        const jsonFields = new Set<string>();
         if (modelInfo?.fields) {
             modelInfo.fields.forEach((field: any) => {
                 const fieldName = field.name;
                 fieldMap[fieldName] = field.dbName || fieldName;
+                // Track JSON fields
+                if (field.kind === 'scalar' && (field.type === 'Json' || field.type === 'Bytes')) {
+                    jsonFields.add(fieldName);
+                }
             });
         }
 
@@ -684,10 +890,20 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             return { query: null, idsInBatch: ids };
         }
 
+        const provider = getDatabaseProvider(prisma);
         const setClauses = Array.from(fieldsToUpdate).map((field) => {
             const fieldUpdates = updates[field];
+            const isJsonField = jsonFields.has(field);
+
             const whenClauses = Object.entries(fieldUpdates)
-                .map(([id, value]) => `        WHEN ${id} THEN ${this.escapeValue(value, prisma)}`)
+                .map(([id, value]) => {
+                    let escapedValue = this.escapeValue(value, prisma);
+                    // For PostgreSQL JSON fields, cast the value to JSONB
+                    if (isJsonField && provider === 'postgresql') {
+                        escapedValue = `${escapedValue}::jsonb`;
+                    }
+                    return `        WHEN ${id} THEN ${escapedValue}`;
+                })
                 .join('\n');
 
             // Usar el nombre de columna mapeado de la base de datos

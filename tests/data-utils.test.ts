@@ -116,6 +116,76 @@ describe('DataUtils', () => {
         category: { create: { name: 'Tech' } },
       });
     });
+
+    /**
+     * Test: should preserve JSON fields without wrapping in connect/create
+     */
+    it('should preserve JSON fields without wrapping in connect/create', () => {
+      const modelInfo = {
+        fields: [
+          { name: 'title', kind: 'scalar', type: 'String' },
+          { name: 'metadata', kind: 'scalar', type: 'Json' },
+          { name: 'author', kind: 'object', type: 'User' },
+        ],
+      };
+
+      const data = {
+        title: 'Post',
+        metadata: { views: 100, likes: 50, tags: ['tech', 'news'] },
+        author: { id: 1 },
+      };
+
+      const result = DataUtils.processRelations(data, modelInfo);
+
+      expect(result).toEqual({
+        title: 'Post',
+        metadata: { views: 100, likes: 50, tags: ['tech', 'news'] }, // JSON preserved as-is
+        author: { connect: { id: 1 } }, // Relation processed normally
+      });
+    });
+
+    /**
+     * Test: should handle JSON fields with nested objects
+     */
+    it('should handle JSON fields with nested objects', () => {
+      const modelInfo = {
+        fields: [
+          { name: 'config', kind: 'scalar', type: 'Json' },
+        ],
+      };
+
+      const data = {
+        config: {
+          settings: {
+            theme: 'dark',
+            notifications: { email: true, push: false },
+          },
+          preferences: ['option1', 'option2'],
+        },
+      };
+
+      const result = DataUtils.processRelations(data, modelInfo);
+
+      // JSON field should be preserved exactly as-is
+      expect(result.config).toEqual(data.config);
+    });
+
+    /**
+     * Test: should work without modelInfo (backward compatibility)
+     */
+    it('should work without modelInfo (backward compatibility)', () => {
+      const data = {
+        title: 'Post',
+        author: { id: 1 },
+      };
+
+      const result = DataUtils.processRelations(data);
+
+      expect(result).toEqual({
+        title: 'Post',
+        author: { connect: { id: 1 } },
+      });
+    });
   });
 
   describe('normalizeRelationsToFK', () => {
