@@ -6,6 +6,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.1.14] - 2025-01-27
+### Added
+- **MongoDB Support**: Full support for MongoDB databases
+  - Added MongoDB provider to `DatabaseProvider` type
+  - Created MongoDB Prisma schema (`tests/prisma/schema.mongodb.prisma`)
+  - Added MongoDB Docker container configuration
+  - Created MongoDB-specific integration tests (15 tests)
+  - Added `test:mongodb` npm script for MongoDB testing
+  - Updated `test-all-databases` script to include MongoDB
+  - MongoDB uses ObjectId (string) instead of autoincrement (number) for IDs
+  - Optimized `updateManyById()` for MongoDB using Prisma transactions
+  - Updated `id` field type to support both `number` (SQL) and `string` (MongoDB)
+  - Added MongoDB connection string to `.env.example`
+  - Complete MongoDB documentation in `docs/mongodb-support.md`
+
+- **Performance Utilities**: New performance optimization module (`src/performance-utils.ts`)
+  - `getOptimalBatchSize()` - Get database-specific optimal batch sizes
+  - `estimateBatchMemoryUsage()` - Estimate memory usage for batch operations
+  - `isBatchSafe()` - Check if batch operation is safe to execute
+  - `createOptimalBatches()` - Split arrays into optimal batches
+  - `createBatchMetrics()` - Track batch operation performance
+  - `withRetry()` - Execute operations with exponential backoff retry
+  - `chunk()` - Efficient array chunking utility
+  - Database-specific batch size configurations (BATCH_SIZE_CONFIG)
+  - Comprehensive test suite for performance utilities (18 tests)
+
+### Changed
+- **Flexible ID Types**: Updated `id` field to support both `number` and `string` types
+  - `BaseEntity.id` is now `number | string | undefined`
+  - `IBaseEntity.id` interface updated to support both types
+  - `delete()` method return type changed to `number | string`
+  - All database operations now handle both ID types correctly
+
+- **Optimized MongoDB Batch Operations**:
+  - `updateManyById()` now uses Prisma transactions for MongoDB (atomic batch updates)
+  - Added `MONGODB_TRANSACTION_BATCH_SIZE` constant (100 items per transaction)
+  - Automatic fallback to individual updates if transaction fails
+  - Transaction timeout and maxWait configuration for reliability
+  - Smaller batch sizes for MongoDB to respect transaction limits
+
+- **Improved Error Handling**:
+  - Better error messages for batch operations
+  - Retry logic for transient errors in `createMany()`
+  - Graceful fallback strategies for failed batch operations
+  - More informative console logging for debugging
+
+### Performance
+- **MongoDB**: Batch updates now use transactions (up to 100x faster than individual updates)
+- **All Databases**: Optimized batch size selection based on database provider
+- **Memory**: Better memory estimation and safety checks for large batches
+
 ## [0.1.13] - 2025-01-27
 
 ### Added

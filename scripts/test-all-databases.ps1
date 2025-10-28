@@ -7,44 +7,24 @@ Write-Host ""
 
 $failed = $false
 
-# Test with SQLite (default)
-Write-Host "===============================================" -ForegroundColor Blue
-Write-Host "Testing with SQLite (default)" -ForegroundColor Blue
-Write-Host "===============================================" -ForegroundColor Blue
-npm test
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] SQLite tests failed" -ForegroundColor Red
-    $failed = $true
-} else {
-    Write-Host "[SUCCESS] SQLite tests passed" -ForegroundColor Green
-}
-Write-Host ""
+# Test each database
+$databases = @('sqlite', 'mysql', 'postgresql', 'mongodb')
 
-# Test with MySQL
-Write-Host "===============================================" -ForegroundColor Blue
-Write-Host "Testing with MySQL" -ForegroundColor Blue
-Write-Host "===============================================" -ForegroundColor Blue
-& "$PSScriptRoot\test-mysql.ps1"
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] MySQL tests failed" -ForegroundColor Red
-    $failed = $true
-} else {
-    Write-Host "[SUCCESS] MySQL tests passed" -ForegroundColor Green
+foreach ($db in $databases) {
+    Write-Host "===============================================" -ForegroundColor Blue
+    Write-Host "Testing with $db" -ForegroundColor Blue
+    Write-Host "===============================================" -ForegroundColor Blue
+    
+    & "$PSScriptRoot\test-database.ps1" -Database $db
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] $db tests failed" -ForegroundColor Red
+        $failed = $true
+    } else {
+        Write-Host "[SUCCESS] $db tests passed" -ForegroundColor Green
+    }
+    Write-Host ""
 }
-Write-Host ""
-
-# Test with PostgreSQL
-Write-Host "===============================================" -ForegroundColor Blue
-Write-Host "Testing with PostgreSQL" -ForegroundColor Blue
-Write-Host "===============================================" -ForegroundColor Blue
-& "$PSScriptRoot\test-postgresql.ps1"
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] PostgreSQL tests failed" -ForegroundColor Red
-    $failed = $true
-} else {
-    Write-Host "[SUCCESS] PostgreSQL tests passed" -ForegroundColor Green
-}
-Write-Host ""
 
 # Summary
 Write-Host "===============================================" -ForegroundColor Blue

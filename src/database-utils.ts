@@ -4,7 +4,7 @@ import { getPrismaInstance } from './config';
 /**
  * Supported database providers
  */
-export type DatabaseProvider = 'mysql' | 'postgresql' | 'sqlite' | 'sqlserver';
+export type DatabaseProvider = 'mysql' | 'postgresql' | 'sqlite' | 'sqlserver' | 'mongodb';
 
 /**
  * Database dialect configuration for SQL generation
@@ -49,6 +49,13 @@ const DIALECTS: Record<DatabaseProvider, DatabaseDialect> = {
         booleanFalse: '0',
         supportsReturning: true,
     },
+    mongodb: {
+        provider: 'mongodb',
+        identifierQuote: '',
+        booleanTrue: 'true',
+        booleanFalse: 'false',
+        supportsReturning: false,
+    },
 };
 
 /**
@@ -91,6 +98,9 @@ export function getDatabaseProvider(prisma?: PrismaClient): DatabaseProvider {
         }
         if (datasourceUrl.startsWith('sqlserver://')) {
             return 'sqlserver';
+        }
+        if (datasourceUrl.startsWith('mongodb://') || datasourceUrl.startsWith('mongodb+srv://')) {
+            return 'mongodb';
         }
     }
 

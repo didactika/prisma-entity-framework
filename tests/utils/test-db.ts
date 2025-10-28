@@ -12,7 +12,7 @@ import { getDatabaseProvider } from '../../src/database-utils';
 export interface TestDbConfig {
   client: any;
   cleanup: () => Promise<void>;
-  provider: 'sqlite' | 'mysql' | 'postgresql';
+  provider: 'sqlite' | 'mysql' | 'postgresql' | 'mongodb';
   supportsSkipDuplicates: boolean;
 }
 
@@ -36,7 +36,7 @@ export interface TestDbConfig {
 export async function setupTestDatabase(): Promise<TestDbConfig> {
   // Detect database URL from environment
   const databaseUrl = process.env.DATABASE_URL;
-  let provider: 'sqlite' | 'mysql' | 'postgresql' = 'sqlite';
+  let provider: 'sqlite' | 'mysql' | 'postgresql' | 'mongodb' = 'sqlite';
   let client: any;
 
   // Determine provider from URL
@@ -45,6 +45,8 @@ export async function setupTestDatabase(): Promise<TestDbConfig> {
       provider = 'mysql';
     } else if (databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://')) {
       provider = 'postgresql';
+    } else if (databaseUrl.startsWith('mongodb://') || databaseUrl.startsWith('mongodb+srv://')) {
+      provider = 'mongodb';
     }
   }
 
@@ -71,10 +73,16 @@ export async function setupTestDatabase(): Promise<TestDbConfig> {
       const clientModule = await import('../../node_modules/.prisma/client-mysql/index.js');
       const { PrismaClient } = clientModule;
       client = new PrismaClient();
-    } else {
+    } else if (provider === 'postgresql') {
       // Use PostgreSQL-specific Prisma client (generated to node_modules/.prisma/client-postgresql)
       // @ts-ignore - Dynamic import path based on runtime provider
       const clientModule = await import('../../node_modules/.prisma/client-postgresql/index.js');
+      const { PrismaClient } = clientModule;
+      client = new PrismaClient();
+    } else {
+      // Use MongoDB-specific Prisma client (generated to node_modules/.prisma/client-mongodb)
+      // @ts-ignore - Dynamic import path based on runtime provider
+      const clientModule = await import('../../node_modules/.prisma/client-mongodb/index.js');
       const { PrismaClient } = clientModule;
       client = new PrismaClient();
     }
@@ -91,8 +99,8 @@ export async function setupTestDatabase(): Promise<TestDbConfig> {
     const detectedProvider = getDatabaseProvider(client);
     console.log(`✅ Test database initialized (${detectedProvider})`);
 
-    // MySQL and PostgreSQL support skipDuplicates, SQLite does not
-    const supportsSkipDuplicates = provider !== 'sqlite';
+    // MySQL and PostgreSQL support skipDuplicates, SQLite and MongoDB do not
+    const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb';
 
     /**
      * Cleanup function to disconnect and clear database
@@ -100,9 +108,12 @@ export async function setupTestDatabase(): Promise<TestDbConfig> {
     const cleanup = async () => {
       try {
         // Clear all data
-        await client.comment.deleteMany();
-        await client.post.deleteMany();
-        await client.user.deleteMany();
+        await client.comment.deleteMany({});
+        await client.post.deleteMany({});
+        await client.user.deleteMany({});
+        if (client.product) {
+          await client.product.deleteMany({});
+        }
 
         // Disconnect
         await client.$disconnect();
@@ -231,9 +242,12 @@ export async function seedTestDatabase(client: any) {
 export async function clearTestDatabase(client: any): Promise<void> {
   try {
     // Delete in order to respect foreign key constraints
-    await client.comment.deleteMany();
-    await client.post.deleteMany();
-    await client.user.deleteMany();
+    await client.comment.deleteMany({});
+    await client.post.deleteMany({});
+    await client.user.deleteMany({});
+    if (client.product) {
+      await client.product.deleteMany({});
+    }
   } catch (error) {
     // If tables don't exist, it's okay - they'll be created on first use
     console.warn('Warning: Could not clear test database, tables may not exist yet', error);

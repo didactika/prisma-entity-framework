@@ -6,11 +6,26 @@ import { getPrismaInstance } from './config';
 import SearchUtils from "./search/search-utils";
 import { PrismaClient } from "@prisma/client";
 import { quoteIdentifier, formatBoolean, getDatabaseProvider } from "./database-utils";
+import { getOptimalBatchSize } from "./performance-utils";
 
 export default abstract class BaseEntity<TModel extends Record<string, any>> implements IBaseEntity<TModel> {
     static readonly model: any;
-    static readonly BATCH_SIZE = 1500;
-    public readonly id?: number;
+    static readonly BATCH_SIZE = 1500; // Default for SQL databases
+    static readonly MONGODB_TRANSACTION_BATCH_SIZE = 100; // MongoDB transaction limit
+    public readonly id?: number | string;
+
+    /**
+     * Get optimal batch size for current database and operation
+     * @param operation - Type of operation (createMany, updateMany, transaction)
+     * @returns Optimal batch size
+     */
+    protected static getOptimalBatchSize(operation: 'createMany' | 'updateMany' | 'transaction' = 'createMany'): number {
+        try {
+            return getOptimalBatchSize(operation);
+        } catch {
+            return BaseEntity.BATCH_SIZE;
+        }
+    }
 
     constructor(data?: Partial<TModel>) {
         this.initializeProperties(data);
@@ -276,10 +291,9 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         if (!entityModel) throw new Error("Model is not defined in the BaseEntity class.");
         if (!Array.isArray(items) || items.length === 0) return 0;
 
-        // Check if database supports skipDuplicates (SQLite doesn't)
         const prisma = getPrismaInstance();
         const provider = getDatabaseProvider(prisma);
-        const supportsSkipDuplicates = provider !== 'sqlite';
+        const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb';
 
         let modelInfo: any = null;
         try {
@@ -288,24 +302,28 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             // Model info not available, continue without it
         }
 
-        let totalCreated = 0;
+        // Process and deduplicate data
         const processedData = items.map(item => {
             const clean = BaseEntity.sanitizeKeysRecursive(item);
             const processed = DataUtils.processRelations(clean, modelInfo);
             return DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
         });
 
-        // Deduplicate data within the batch to avoid constraint errors
         const deduplicatedData = BaseEntity.deduplicateByUniqueConstraints(processedData, entityModel.name);
 
         if (deduplicatedData.length < processedData.length) {
             console.warn(`⚠️  [${entityModel.name}] Removed ${processedData.length - deduplicatedData.length} duplicate records from batch`);
         }
 
+        let totalCreated = 0;
+
+        // Process in batches
         for (let i = 0; i < deduplicatedData.length; i += BaseEntity.BATCH_SIZE) {
             const batch = deduplicatedData.slice(i, i + BaseEntity.BATCH_SIZE);
+
             try {
                 const options: any = { data: batch };
+                // Only add skipDuplicates if supported (not MongoDB or SQLite)
                 if (skipDuplicates && supportsSkipDuplicates) {
                     options.skipDuplicates = true;
                 }
@@ -314,10 +332,9 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                 totalCreated += result.count;
             } catch (error) {
                 const errorMsg = (error as Error).message;
-                console.error(`❌ Error in createMany batch for ${entityModel.name} (index ${i}): ${errorMsg}`);
 
-                // If it's a unique constraint error and skipDuplicates is false, try with skipDuplicates=true
-                if (errorMsg.includes('Unique constraint failed') && !skipDuplicates && supportsSkipDuplicates) {
+                // Handle unique constraint errors with retry logic (only for SQL databases that support it)
+                if (errorMsg.includes('Unique constraint') && !skipDuplicates && supportsSkipDuplicates) {
                     console.log(`🔄 Retrying batch ${i} with skipDuplicates=true...`);
                     try {
                         const retryResult = await entityModel.createMany({
@@ -327,13 +344,16 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                         totalCreated += retryResult.count;
                         console.log(`✅ Retry successful: ${retryResult.count} records created`);
                     } catch (retryError) {
+                        console.error(`❌ Retry failed for batch ${i}:`, (retryError as Error).message);
                         throw retryError;
                     }
                 } else {
+                    console.error(`❌ Error in createMany batch for ${entityModel.name} (index ${i}):`, errorMsg);
                     throw error;
                 }
             }
         }
+
         return totalCreated;
     }
 
@@ -571,13 +591,14 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
 
         // Batch create
         if (toCreate.length > 0) {
-            // Check if database supports skipDuplicates (SQLite doesn't)
+            // Check if database supports skipDuplicates (SQLite and MongoDB don't)
             const prisma = getPrismaInstance();
             const provider = getDatabaseProvider(prisma);
-            const supportsSkipDuplicates = provider !== 'sqlite';
+            const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb';
 
             try {
                 const options: any = { data: toCreate };
+                // Only add skipDuplicates if the database supports it
                 if (supportsSkipDuplicates) {
                     options.skipDuplicates = true;
                 }
@@ -806,6 +827,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
     ): Promise<number> {
         if (!Array.isArray(dataList) || dataList.length === 0) return 0;
         const prisma = getPrismaInstance();
+        const provider = getDatabaseProvider(prisma);
         const modelInfo = (this as any).getModelInformation();
         const tableName = modelInfo.dbName || modelInfo.name || (this as any).model?.name;
 
@@ -815,6 +837,13 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
 
         const formattedList = BaseEntity.prepareUpdateList(dataList, modelInfo);
         let totalUpdated = 0;
+
+        // MongoDB: Use optimized batch transactions
+        if (provider === 'mongodb') {
+            return await BaseEntity.updateManyByIdMongoDB(formattedList, (this as any).model, prisma);
+        }
+
+        // SQL databases use optimized batch update query
         for (let i = 0; i < formattedList.length; i += BaseEntity.BATCH_SIZE) {
             const batch = formattedList.slice(i, i + BaseEntity.BATCH_SIZE);
             const { query } = BaseEntity.buildUpdateQuery(batch, tableName, modelInfo);
@@ -827,6 +856,58 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                 throw new Error(`Error executing batch update query: ${(error as Error).message}`);
             }
         }
+        return totalUpdated;
+    }
+
+    /**
+     * Optimized MongoDB batch update using transactions
+     * Uses Prisma's transaction API for atomic batch operations
+     * MongoDB has transaction size limits, so we use smaller batches
+     * @private
+     */
+    private static async updateManyByIdMongoDB(
+        formattedList: Array<Record<string, any>>,
+        entityModel: any,
+        prisma: PrismaClient
+    ): Promise<number> {
+        let totalUpdated = 0;
+        const batchSize = BaseEntity.MONGODB_TRANSACTION_BATCH_SIZE;
+
+        // Process in smaller batches for MongoDB transaction limits
+        for (let i = 0; i < formattedList.length; i += batchSize) {
+            const batch = formattedList.slice(i, i + batchSize);
+
+            try {
+                // Use Prisma transaction for atomic batch updates
+                const results = await (prisma as any).$transaction(
+                    batch.map(item => {
+                        const { id, ...data } = item;
+                        return entityModel.update({ where: { id }, data });
+                    }),
+                    {
+                        maxWait: 5000, // 5 seconds max wait
+                        timeout: 10000, // 10 seconds timeout
+                    }
+                );
+                totalUpdated += results.length;
+            } catch (error) {
+                const errorMsg = (error as Error).message;
+                console.error(`❌ Error in MongoDB batch update (${i + 1} - ${Math.min(i + batch.length, formattedList.length)}):`, errorMsg);
+
+                // Fallback to individual updates if transaction fails
+                console.log(`🔄 Falling back to individual updates for batch ${i}...`);
+                for (const item of batch) {
+                    const { id, ...data } = item;
+                    try {
+                        await entityModel.update({ where: { id }, data });
+                        totalUpdated++;
+                    } catch (itemError) {
+                        console.error(`❌ Error updating record ${id}:`, (itemError as Error).message);
+                    }
+                }
+            }
+        }
+
         return totalUpdated;
     }
 
@@ -980,7 +1061,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         return { query, idsInBatch: ids };
     }
 
-    async delete(): Promise<number> {
+    async delete(): Promise<number | string> {
         if (!this.id) throw new Error("Cannot delete: Missing primary key (id)");
         const { model } = this.constructor as any;
         if (!model) throw new Error("The model is not defined in the child class of BaseEntity.");

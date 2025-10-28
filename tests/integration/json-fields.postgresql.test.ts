@@ -25,7 +25,7 @@ interface IProduct {
   updatedAt?: Date;
 }
 
-class Product extends BaseEntity<IProduct> implements IProduct {
+class Product extends BaseEntity<IProduct> {
   static override readonly model: any;
 
   private _name!: string;

@@ -30,6 +30,21 @@ export {
     type DatabaseDialect
 } from './database-utils';
 
+// Performance utilities
+export {
+    getOptimalBatchSize,
+    estimateBatchMemoryUsage,
+    isBatchSafe,
+    createOptimalBatches,
+    createBatchMetrics,
+    withRetry,
+    chunk,
+    BATCH_SIZE_CONFIG,
+    DEFAULT_RETRY_CONFIG,
+    type BatchMetrics,
+    type RetryConfig
+} from './performance-utils';
+
 // Decorators
 export { Property } from './decorators/property.decorator';
 

@@ -5,8 +5,9 @@
 export interface IBaseEntity<TModel> {
     /**
      * Unique identifier of the entity (optional).
+     * Can be a number (for SQL databases) or string (for MongoDB ObjectId).
      */
-    id?: number;
+    id?: number | string;
 
     /**
      * Creates a new instance of the entity in the database.
@@ -22,8 +23,8 @@ export interface IBaseEntity<TModel> {
 
     /**
      * Deletes the entity from the database.
-     * @returns A promise that resolves with the number of deleted records
-     * (typically `1` if the deletion was successful).
+     * @returns A promise that resolves with the id of the deleted record
+     * (number for SQL databases, string for MongoDB, or 0 if deletion failed).
      */
-    delete(): Promise<number>;
+    delete(): Promise<number | string>;
 }

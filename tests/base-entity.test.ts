@@ -25,7 +25,7 @@ interface IUser extends IBaseEntity {
  * Test User entity class
  * Following the real project pattern: private properties with getters/setters
  */
-class User extends BaseEntity<IUser> implements IUser {
+class User extends BaseEntity<IUser> {
   static override readonly model = mockPrismaClient.user;
 
   private _name!: IUser['name'];
