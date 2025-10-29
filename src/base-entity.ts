@@ -6,7 +6,7 @@ import { getPrismaInstance } from './config';
 import SearchUtils from "./search/search-utils";
 import { PrismaClient } from "@prisma/client";
 import { quoteIdentifier, formatBoolean, getDatabaseProvider } from "./database-utils";
-import { getOptimalBatchSize } from "./performance-utils";
+import { getOptimalBatchSize, getOptimalOrBatchSize, isOrQuerySafe } from "./performance-utils";
 
 export default abstract class BaseEntity<TModel extends Record<string, any>> implements IBaseEntity<TModel> {
     static readonly model: any;
@@ -529,13 +529,31 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             }
         });
 
-        // Fetch all existing records in one query
+        // Fetch all existing records in batches to avoid database placeholder limits
         let existingRecords: T[] = [];
         if (orConditions.length > 0) {
             try {
-                existingRecords = await entityModel.findMany({
-                    where: { OR: orConditions }
-                });
+                // Calculate optimal batch size based on database and number of fields per condition
+                // Each unique constraint might have multiple fields (e.g., {email, tenantId})
+                const fieldsPerCondition = uniqueConstraints[0]?.length || 1;
+                
+                // Check if we can execute in a single query
+                if (isOrQuerySafe(orConditions)) {
+                    existingRecords = await entityModel.findMany({
+                        where: { OR: orConditions }
+                    });
+                } else {
+                    // Need to batch the query
+                    const batchSize = getOptimalOrBatchSize(fieldsPerCondition);
+                    
+                    for (let i = 0; i < orConditions.length; i += batchSize) {
+                        const batch = orConditions.slice(i, i + batchSize);
+                        const batchRecords = await entityModel.findMany({
+                            where: { OR: batch }
+                        });
+                        existingRecords.push(...batchRecords);
+                    }
+                }
             } catch (error) {
                 console.warn(`Warning: Could not fetch existing records in batch: ${(error as Error).message}`);
             }

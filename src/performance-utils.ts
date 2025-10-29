@@ -259,3 +259,146 @@ export function chunk<T>(array: T[], size: number): T[][] {
     }
     return chunks;
 }
+
+/**
+ * Database-specific placeholder/parameter limits
+ * These are hard limits imposed by the database engines
+ */
+const DATABASE_LIMITS = {
+    sqlite: {
+        maxParameters: 999,        // SQLITE_MAX_VARIABLE_NUMBER default
+        maxPlaceholders: 999,
+    },
+    mysql: {
+        maxParameters: 65535,      // MySQL prepared statement limit
+        maxPlaceholders: 65535,
+    },
+    postgresql: {
+        maxParameters: 32767,      // PostgreSQL parameter limit ($1, $2, etc.)
+        maxPlaceholders: 32767,
+    },
+    sqlserver: {
+        maxParameters: 2100,       // SQL Server parameter limit
+        maxPlaceholders: 2100,
+    },
+    mongodb: {
+        maxParameters: Infinity,   // MongoDB doesn't have this limit
+        maxPlaceholders: Infinity,
+    },
+} as const;
+
+/**
+ * Calculate optimal batch size for OR conditions in WHERE clauses
+ * Prevents "too many placeholders" errors in databases
+ * 
+ * @param fieldsPerCondition - Number of fields in each OR condition (e.g., 2 for {email, username})
+ * @param safetyMargin - Safety margin as percentage (default: 0.8 = 80% of max)
+ * @returns Optimal number of OR conditions per batch
+ * 
+ * @example
+ * ```typescript
+ * // For upsert with email field (1 field per condition)
+ * const batchSize = getOptimalOrBatchSize(1);
+ * 
+ * // For composite unique constraint {email, tenantId} (2 fields)
+ * const batchSize = getOptimalOrBatchSize(2);
+ * 
+ * // Batch the OR conditions
+ * for (let i = 0; i < orConditions.length; i += batchSize) {
+ *   const batch = orConditions.slice(i, i + batchSize);
+ *   await model.findMany({ where: { OR: batch } });
+ * }
+ * ```
+ */
+export function getOptimalOrBatchSize(
+    fieldsPerCondition: number = 1,
+    safetyMargin: number = 0.8
+): number {
+    try {
+        const prisma = getPrismaInstance();
+        const provider = getDatabaseProvider(prisma);
+        const limits = DATABASE_LIMITS[provider];
+
+        // Calculate max conditions based on placeholder limit
+        // Each condition uses fieldsPerCondition placeholders
+        const maxConditions = Math.floor(limits.maxPlaceholders / fieldsPerCondition);
+
+        // Apply safety margin to avoid edge cases
+        const safeMaxConditions = Math.floor(maxConditions * safetyMargin);
+
+        // Return at least 1, but no more than a reasonable upper limit
+        return Math.max(1, Math.min(safeMaxConditions, 10000));
+    } catch (error) {
+        // Fallback to conservative default if detection fails
+        console.warn('Could not detect database provider for OR batch size, using conservative default');
+        // Conservative default: assume 2 fields per condition, MySQL-like limit
+        return Math.floor((65535 / Math.max(fieldsPerCondition, 1)) * 0.8);
+    }
+}
+
+/**
+ * Calculate the number of placeholders needed for a set of OR conditions
+ * Useful for validating if a query will exceed database limits
+ * 
+ * @param orConditions - Array of OR condition objects
+ * @returns Total number of placeholders needed
+ * 
+ * @example
+ * ```typescript
+ * const orConditions = [
+ *   { email: 'user1@example.com' },
+ *   { email: 'user2@example.com', username: 'user2' }
+ * ];
+ * 
+ * const placeholders = calculateOrPlaceholders(orConditions);
+ * // Returns: 3 (1 field in first condition + 2 fields in second)
+ * ```
+ */
+export function calculateOrPlaceholders(orConditions: Record<string, any>[]): number {
+    return orConditions.reduce((total, condition) => {
+        return total + Object.keys(condition).length;
+    }, 0);
+}
+
+/**
+ * Check if a set of OR conditions is safe to execute without batching
+ * 
+ * @param orConditions - Array of OR condition objects
+ * @param safetyMargin - Safety margin as percentage (default: 0.8)
+ * @returns True if safe to execute in single query, false if batching needed
+ * 
+ * @example
+ * ```typescript
+ * const orConditions = [...]; // Large array of conditions
+ * 
+ * if (isOrQuerySafe(orConditions)) {
+ *   // Execute in single query
+ *   await model.findMany({ where: { OR: orConditions } });
+ * } else {
+ *   // Need to batch
+ *   const batchSize = getOptimalOrBatchSize(1);
+ *   for (let i = 0; i < orConditions.length; i += batchSize) {
+ *     const batch = orConditions.slice(i, i + batchSize);
+ *     await model.findMany({ where: { OR: batch } });
+ *   }
+ * }
+ * ```
+ */
+export function isOrQuerySafe(
+    orConditions: Record<string, any>[],
+    safetyMargin: number = 0.8
+): boolean {
+    try {
+        const prisma = getPrismaInstance();
+        const provider = getDatabaseProvider(prisma);
+        const limits = DATABASE_LIMITS[provider];
+
+        const totalPlaceholders = calculateOrPlaceholders(orConditions);
+        const safeLimit = Math.floor(limits.maxPlaceholders * safetyMargin);
+
+        return totalPlaceholders <= safeLimit;
+    } catch (error) {
+        // If we can't detect, assume it's not safe (conservative approach)
+        return false;
+    }
+}
