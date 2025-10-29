@@ -12,8 +12,34 @@ export {
     configurePrisma,
     getPrismaInstance,
     isPrismaConfigured,
-    resetPrismaConfiguration
+    resetPrismaConfiguration,
+    getConnectionPoolSize,
+    getMaxConcurrency,
+    isParallelEnabled,
+    type PrismaConfig
 } from './config';
+
+// Rate Limiter
+export {
+    RateLimiter,
+    TokenBucketRateLimiter,
+    createRateLimiter,
+    type RateLimiterOptions,
+    type RateLimiterStatus
+} from './rate-limiter';
+
+// Parallel Execution
+export {
+    executeInParallel,
+    chunkForParallel,
+    getOptimalConcurrency,
+    shouldUseParallel,
+    createParallelMetrics,
+    ParallelMetricsTracker,
+    type ParallelOptions,
+    type ParallelResult,
+    type ParallelMetrics
+} from './parallel-utils';
 
 // Core classes
 export { default as BaseEntity } from './base-entity';

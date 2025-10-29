@@ -50,6 +50,9 @@ export namespace FindByFilterOptions {
         search?: SearchOptions;
         pagination?: PaginationOptions;
         orderBy?: Record<string, 'asc' | 'desc'>;
+        parallel?: boolean;
+        concurrency?: number;
+        rateLimit?: number;
     };
 
     export const defaultOptions: Options = {
@@ -57,6 +60,9 @@ export namespace FindByFilterOptions {
         relationsToInclude: [],
         search: undefined,
         pagination: undefined,
-        orderBy: undefined
+        orderBy: undefined,
+        parallel: undefined,
+        concurrency: undefined,
+        rateLimit: undefined
     }
 }

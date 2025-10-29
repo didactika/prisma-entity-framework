@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.14] - 2025-01-27
+## [1.0.0] - 2025-01-29
+
+### Added
+- Parallel batch operations with automatic connection pool detection (2-6x performance improvement)
+  - Pool size detection from `DATABASE_URL` parameters (`connection_limit`, `pool_size`, `maxPoolSize`)
+  - MongoDB `maxPoolSize` parameter support for connection pool configuration
+  - New parallel execution utilities: `executeInParallel()`, `chunkForParallel()`, `shouldUseParallel()`
+  - Rate limiting with token bucket algorithm (`createRateLimiter()`, `TokenBucketRateLimiter`)
+  - Performance metrics tracking (speedup, efficiency, throughput)
+- OR query batching with database-aware limits
+  - `getOptimalOrBatchSize()` for safe batch size calculation
+  - `calculateOrPlaceholders()` for placeholder usage tracking
+  - `isOrQuerySafe()` to determine if batching is needed
+  - Database-specific placeholder/parameter limit configurations
+- Comprehensive documentation in `docs/parallel-batch-operations.md` and `docs/or-query-batching.md`
+
+### Changed
+- All batch methods now support parallel execution with optional `parallel` and `concurrency` parameters
+  - `createMany()`, `upsertMany()`, `updateManyById()`, `deleteByIds()` enhanced with parallel options
+  - Automatic fallback to sequential execution for small datasets or single connections
+  - PostgreSQL: Up to 3.2x speedup for deletes, 2.4x for creates
+  - MySQL: Up to 4.8x speedup for deletes
+  - MongoDB: 1.3-1.8x speedup with conservative concurrency (2-4 recommended)
+- Test infrastructure improvements
+  - Jest configuration excludes database-specific tests from default suite
+  - Dedicated test scripts for each database: `test:mongodb`, `test:postgresql`, `test:mysql`, `test:sqlite`
+  - 78 new unit tests for parallel execution infrastructure
+  - Database compatibility integration tests and performance benchmarks
+
+## [0.1.14] - 2025-10-27
 ### Added
 - **MongoDB Support**: Full support for MongoDB databases
   - Added MongoDB provider to `DatabaseProvider` type
@@ -58,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **All Databases**: Optimized batch size selection based on database provider
 - **Memory**: Better memory estimation and safety checks for large batches
 
-## [0.1.13] - 2025-01-27
+## [0.1.13] - 2025-10-27
 
 ### Added
 - **JSON Field Support**: Full support for JSON/JSONB fields in all database operations

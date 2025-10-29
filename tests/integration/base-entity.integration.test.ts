@@ -50,6 +50,24 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     // Configure User entity with real Prisma model
     (User as any).model = prisma.user;
     configurePrisma(prisma as any);
+
+    // Log detected pool size for MongoDB
+    if (db.provider === 'mongodb') {
+      const { getConnectionPoolSize } = require('../../src/config');
+      const poolSize = getConnectionPoolSize();
+      console.log(`✅ Detected MongoDB connection pool size: ${poolSize}`);
+      
+      if (process.env.DATABASE_URL?.includes('maxPoolSize')) {
+        const match = process.env.DATABASE_URL.match(/maxPoolSize=(\d+)/);
+        if (match) {
+          const expectedSize = parseInt(match[1], 10);
+          console.log(`✅ maxPoolSize parameter in DATABASE_URL: ${expectedSize}`);
+          if (poolSize === expectedSize) {
+            console.log(`✅ Pool size correctly detected from maxPoolSize parameter!`);
+          }
+        }
+      }
+    }
   }, 30000); // 30 second timeout for database setup
 
   afterAll(async () => {

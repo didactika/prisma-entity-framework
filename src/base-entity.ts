@@ -7,6 +7,8 @@ import SearchUtils from "./search/search-utils";
 import { PrismaClient } from "@prisma/client";
 import { quoteIdentifier, formatBoolean, getDatabaseProvider } from "./database-utils";
 import { getOptimalBatchSize, getOptimalOrBatchSize, isOrQuerySafe } from "./performance-utils";
+import { executeInParallel } from "./parallel-utils";
+import { isParallelEnabled } from "./config";
 
 export default abstract class BaseEntity<TModel extends Record<string, any>> implements IBaseEntity<TModel> {
     static readonly model: any;
@@ -175,27 +177,88 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
 
             return data;
         } else {
+            // Large list search - chunk and execute queries
             const longValues = listSearch[longIndex].values;
             const chunks: any[][] = [];
             for (let i = 0; i < longValues.length; i += CHUNK_SIZE) {
                 chunks.push(longValues.slice(i, i + CHUNK_SIZE));
             }
 
-            const queryPromises = chunks.map(chunkValues => {
-                const searchClone = options.search ? JSON.parse(JSON.stringify(options.search)) : undefined;
-                if (searchClone?.listSearch?.[longIndex]) {
-                    searchClone.listSearch[longIndex].values = chunkValues;
+            // Determine if we should use parallel execution
+            const useParallel = options.parallel !== false && 
+                               isParallelEnabled() && 
+                               chunks.length > 1;
+
+            let allResults: T[][];
+
+            if (useParallel) {
+                // Execute chunks in parallel
+                const operations = chunks.map(chunkValues => 
+                    () => {
+                        const searchClone = options.search ? JSON.parse(JSON.stringify(options.search)) : undefined;
+                        if (searchClone?.listSearch?.[longIndex]) {
+                            searchClone.listSearch[longIndex].values = chunkValues;
+                        }
+                        const whereClause = searchClone ? SearchUtils.applySearchFilter(whereClauseBase, searchClone, modelInfo) : whereClauseBase;
+                        return entityModel.findMany({ where: whereClause, include }) as Promise<T[]>;
+                    }
+                );
+
+                const result = await executeInParallel(operations, {
+                    concurrency: options.concurrency,
+                    rateLimit: options.rateLimit
+                });
+
+                allResults = result.results as T[][];
+
+                if (result.errors.length > 0) {
+                    console.warn(`Warning: ${result.errors.length} chunks failed in parallel findByFilter`);
                 }
-                const whereClause = searchClone ? SearchUtils.applySearchFilter(whereClauseBase, searchClone, modelInfo) : whereClauseBase;
-                return entityModel.findMany({ where: whereClause, include }) as Promise<T[]>;
+            } else {
+                // Execute chunks sequentially
+                const queryPromises = chunks.map(chunkValues => {
+                    const searchClone = options.search ? JSON.parse(JSON.stringify(options.search)) : undefined;
+                    if (searchClone?.listSearch?.[longIndex]) {
+                        searchClone.listSearch[longIndex].values = chunkValues;
+                    }
+                    const whereClause = searchClone ? SearchUtils.applySearchFilter(whereClauseBase, searchClone, modelInfo) : whereClauseBase;
+                    return entityModel.findMany({ where: whereClause, include }) as Promise<T[]>;
+                });
+
+                allResults = await Promise.all(queryPromises);
+            }
+
+            // Flatten and deduplicate results
+            const flattened = ([] as T[]).concat(...allResults);
+            
+            // Deduplicate by id if present
+            const seen = new Set<any>();
+            const deduplicated = flattened.filter(item => {
+                const id = (item as any).id;
+                if (id !== undefined) {
+                    if (seen.has(id)) return false;
+                    seen.add(id);
+                }
+                return true;
             });
 
-            const allResults = await Promise.all(queryPromises);
-            const flattened = ([] as T[]).concat(...allResults);
+            // Apply orderBy if specified
+            let finalResults = deduplicated;
+            if (options.orderBy) {
+                const orderByKey = Object.keys(options.orderBy)[0];
+                const orderByDirection = options.orderBy[orderByKey];
+                finalResults = deduplicated.sort((a, b) => {
+                    const aVal = (a as any)[orderByKey];
+                    const bVal = (b as any)[orderByKey];
+                    if (aVal < bVal) return orderByDirection === 'asc' ? -1 : 1;
+                    if (aVal > bVal) return orderByDirection === 'asc' ? 1 : -1;
+                    return 0;
+                });
+            }
 
-            if (options.onlyOne) return flattened[0] ?? null;
+            if (options.onlyOne) return finalResults[0] ?? null;
 
-            return flattened;
+            return finalResults;
         }
     }
 
@@ -285,7 +348,11 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         this: new (data: any) => BaseEntity<T>,
         items: Partial<T>[],
         skipDuplicates = false,
-        keyTransformTemplate: (relationName: string) => string = (key) => `${key}Id`
+        keyTransformTemplate: (relationName: string) => string = (key) => `${key}Id`,
+        options?: {
+            parallel?: boolean;
+            concurrency?: number;
+        }
     ): Promise<number> {
         const entityModel = (this as any).model;
         if (!entityModel) throw new Error("Model is not defined in the BaseEntity class.");
@@ -315,41 +382,98 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             console.warn(`⚠️  [${entityModel.name}] Removed ${processedData.length - deduplicatedData.length} duplicate records from batch`);
         }
 
-        let totalCreated = 0;
-
-        // Process in batches
+        // Create batches
+        const batches: any[][] = [];
         for (let i = 0; i < deduplicatedData.length; i += BaseEntity.BATCH_SIZE) {
-            const batch = deduplicatedData.slice(i, i + BaseEntity.BATCH_SIZE);
-
-            try {
-                const options: any = { data: batch };
-                // Only add skipDuplicates if supported (not MongoDB or SQLite)
-                if (skipDuplicates && supportsSkipDuplicates) {
-                    options.skipDuplicates = true;
-                }
-
-                const result = await entityModel.createMany(options);
-                totalCreated += result.count;
-            } catch (error) {
-                const errorMsg = (error as Error).message;
-
-                // Handle unique constraint errors with retry logic (only for SQL databases that support it)
-                if (errorMsg.includes('Unique constraint') && !skipDuplicates && supportsSkipDuplicates) {
-                    console.log(`🔄 Retrying batch ${i} with skipDuplicates=true...`);
+            batches.push(deduplicatedData.slice(i, i + BaseEntity.BATCH_SIZE));
+        }
+        
+        // Determine if we should use parallel execution
+        const useParallel = options?.parallel !== false && 
+                           isParallelEnabled() && 
+                           batches.length > 1;
+        
+        let totalCreated = 0;
+        
+        if (useParallel) {
+            // Execute batches in parallel
+            const operations = batches.map((batch, batchIndex) => 
+                async () => {
                     try {
-                        const retryResult = await entityModel.createMany({
-                            data: batch,
-                            skipDuplicates: true
-                        });
-                        totalCreated += retryResult.count;
-                        console.log(`✅ Retry successful: ${retryResult.count} records created`);
-                    } catch (retryError) {
-                        console.error(`❌ Retry failed for batch ${i}:`, (retryError as Error).message);
-                        throw retryError;
+                        const createOptions: any = { data: batch };
+                        if (skipDuplicates && supportsSkipDuplicates) {
+                            createOptions.skipDuplicates = true;
+                        }
+                        
+                        const result = await entityModel.createMany(createOptions);
+                        return result.count;
+                    } catch (error) {
+                        const errorMsg = (error as Error).message;
+                        
+                        // Handle unique constraint errors with retry
+                        if (errorMsg.includes('Unique constraint') && !skipDuplicates && supportsSkipDuplicates) {
+                            console.log(`🔄 Retrying batch ${batchIndex} with skipDuplicates=true...`);
+                            try {
+                                const retryResult = await entityModel.createMany({
+                                    data: batch,
+                                    skipDuplicates: true
+                                });
+                                console.log(`✅ Retry successful: ${retryResult.count} records created`);
+                                return retryResult.count;
+                            } catch (retryError) {
+                                console.error(`❌ Retry failed for batch ${batchIndex}:`, (retryError as Error).message);
+                                throw retryError;
+                            }
+                        } else {
+                            console.error(`❌ Error in createMany batch ${batchIndex}:`, errorMsg);
+                            throw error;
+                        }
                     }
-                } else {
-                    console.error(`❌ Error in createMany batch for ${entityModel.name} (index ${i}):`, errorMsg);
-                    throw error;
+                }
+            );
+            
+            const result = await executeInParallel(operations, {
+                concurrency: options?.concurrency
+            });
+            
+            totalCreated = result.results.reduce((sum, count) => sum + (count as number), 0);
+            
+            if (result.errors.length > 0) {
+                console.warn(`Warning: ${result.errors.length} batches failed in parallel createMany`);
+            }
+        } else {
+            // Execute sequentially (original behavior)
+            for (let i = 0; i < batches.length; i++) {
+                const batch = batches[i];
+                
+                try {
+                    const createOptions: any = { data: batch };
+                    if (skipDuplicates && supportsSkipDuplicates) {
+                        createOptions.skipDuplicates = true;
+                    }
+                    
+                    const result = await entityModel.createMany(createOptions);
+                    totalCreated += result.count;
+                } catch (error) {
+                    const errorMsg = (error as Error).message;
+                    
+                    if (errorMsg.includes('Unique constraint') && !skipDuplicates && supportsSkipDuplicates) {
+                        console.log(`🔄 Retrying batch ${i} with skipDuplicates=true...`);
+                        try {
+                            const retryResult = await entityModel.createMany({
+                                data: batch,
+                                skipDuplicates: true
+                            });
+                            totalCreated += retryResult.count;
+                            console.log(`✅ Retry successful: ${retryResult.count} records created`);
+                        } catch (retryError) {
+                            console.error(`❌ Retry failed for batch ${i}:`, (retryError as Error).message);
+                            throw retryError;
+                        }
+                    } else {
+                        console.error(`❌ Error in createMany batch ${i}:`, errorMsg);
+                        throw error;
+                    }
                 }
             }
         }
@@ -471,7 +595,11 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
     public static async upsertMany<T extends Record<string, any>>(
         this: new (data: any) => BaseEntity<T>,
         items: Partial<T>[],
-        keyTransformTemplate: (relationName: string) => string = (key) => `${key}Id`
+        keyTransformTemplate: (relationName: string) => string = (key) => `${key}Id`,
+        options?: {
+            parallel?: boolean;
+            concurrency?: number;
+        }
     ): Promise<{ created: number; updated: number; unchanged: number; total: number }> {
         const entityModel = (this as any).model;
         if (!entityModel) throw new Error("Model is not defined in the BaseEntity class.");
@@ -546,12 +674,44 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                     // Need to batch the query
                     const batchSize = getOptimalOrBatchSize(fieldsPerCondition);
                     
+                    // Create batches
+                    const batches: any[][] = [];
                     for (let i = 0; i < orConditions.length; i += batchSize) {
-                        const batch = orConditions.slice(i, i + batchSize);
-                        const batchRecords = await entityModel.findMany({
-                            where: { OR: batch }
+                        batches.push(orConditions.slice(i, i + batchSize));
+                    }
+                    
+                    // Determine if we should use parallel execution
+                    const useParallel = options?.parallel !== false && 
+                                       isParallelEnabled() && 
+                                       batches.length > 1;
+                    
+                    if (useParallel) {
+                        // Execute batches in parallel
+                        const operations = batches.map(batch => 
+                            () => entityModel.findMany({ where: { OR: batch } })
+                        );
+                        
+                        const result = await executeInParallel(operations, {
+                            concurrency: options?.concurrency
                         });
-                        existingRecords.push(...batchRecords);
+                        
+                        // Merge results from all parallel queries
+                        for (const batchRecords of result.results) {
+                            existingRecords.push(...(batchRecords as T[]));
+                        }
+                        
+                        // Log any errors but continue
+                        if (result.errors.length > 0) {
+                            console.warn(`Warning: ${result.errors.length} batch queries failed`);
+                        }
+                    } else {
+                        // Execute batches sequentially
+                        for (const batch of batches) {
+                            const batchRecords = await entityModel.findMany({
+                                where: { OR: batch }
+                            });
+                            existingRecords.push(...batchRecords);
+                        }
                     }
                 }
             } catch (error) {
@@ -603,53 +763,134 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             }
         });
 
-        // Execute batch operations
+        // Execute batch operations (potentially in parallel)
         let created = 0;
         let updated = 0;
-
-        // Batch create
-        if (toCreate.length > 0) {
-            // Check if database supports skipDuplicates (SQLite and MongoDB don't)
-            const prisma = getPrismaInstance();
-            const provider = getDatabaseProvider(prisma);
-            const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb';
-
-            try {
-                const options: any = { data: toCreate };
-                // Only add skipDuplicates if the database supports it
-                if (supportsSkipDuplicates) {
-                    options.skipDuplicates = true;
-                }
-                const result = await entityModel.createMany(options);
-                created = result.count;
-            } catch (error) {
-                console.error(`Error in batch create: ${(error as Error).message}`);
-                // Fallback to individual creates
-                for (const data of toCreate) {
+        
+        // Determine if we should use parallel execution for creates and updates
+        const useParallel = options?.parallel !== false && 
+                           isParallelEnabled() && 
+                           (toCreate.length > 0 && toUpdate.length > 0);
+        
+        if (useParallel) {
+            // Execute creates and updates in parallel
+            const operations: Array<() => Promise<number>> = [];
+            
+            if (toCreate.length > 0) {
+                operations.push(async () => {
+                    const prisma = getPrismaInstance();
+                    const provider = getDatabaseProvider(prisma);
+                    const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb';
+                    
                     try {
-                        await entityModel.create({ data });
-                        created++;
-                    } catch (err) {
-                        console.error(`Failed to create individual record: ${(err as Error).message}`);
+                        const createOptions: any = { data: toCreate };
+                        if (supportsSkipDuplicates) {
+                            createOptions.skipDuplicates = true;
+                        }
+                        const result = await entityModel.createMany(createOptions);
+                        return result.count;
+                    } catch (error) {
+                        console.error(`Error in batch create: ${(error as Error).message}`);
+                        // Fallback to individual creates
+                        let count = 0;
+                        for (const data of toCreate) {
+                            try {
+                                await entityModel.create({ data });
+                                count++;
+                            } catch (err) {
+                                console.error(`Failed to create individual record: ${(err as Error).message}`);
+                            }
+                        }
+                        return count;
+                    }
+                });
+            }
+            
+            if (toUpdate.length > 0) {
+                operations.push(async () => {
+                    try {
+                        const updateData = toUpdate.map(({ id, data }) => ({ id, ...data }));
+                        return await (this as any).updateManyById(updateData, { parallel: false }); // Avoid nested parallelization
+                    } catch (error) {
+                        console.error(`Error in batch update: ${(error as Error).message}`);
+                        // Fallback to individual updates
+                        let count = 0;
+                        for (const { id, data } of toUpdate) {
+                            try {
+                                await entityModel.update({ where: { id }, data });
+                                count++;
+                            } catch (err) {
+                                console.error(`Failed to update individual record: ${(err as Error).message}`);
+                            }
+                        }
+                        return count;
+                    }
+                });
+            }
+            
+            // Execute in parallel
+            const result = await executeInParallel(operations, {
+                concurrency: options?.concurrency
+            });
+            
+            // Assign results
+            let resultIndex = 0;
+            if (toCreate.length > 0) {
+                created = result.results[resultIndex++] || 0;
+            }
+            if (toUpdate.length > 0) {
+                updated = result.results[resultIndex++] || 0;
+            }
+            
+            // Log any errors
+            if (result.errors.length > 0) {
+                console.warn(`Warning: ${result.errors.length} operations failed in parallel execution`);
+            }
+        } else {
+            // Execute sequentially (original behavior)
+            
+            // Batch create
+            if (toCreate.length > 0) {
+                const prisma = getPrismaInstance();
+                const provider = getDatabaseProvider(prisma);
+                const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb';
+
+                try {
+                    const createOptions: any = { data: toCreate };
+                    if (supportsSkipDuplicates) {
+                        createOptions.skipDuplicates = true;
+                    }
+                    const result = await entityModel.createMany(createOptions);
+                    created = result.count;
+                } catch (error) {
+                    console.error(`Error in batch create: ${(error as Error).message}`);
+                    // Fallback to individual creates
+                    for (const data of toCreate) {
+                        try {
+                            await entityModel.create({ data });
+                            created++;
+                        } catch (err) {
+                            console.error(`Failed to create individual record: ${(err as Error).message}`);
+                        }
                     }
                 }
             }
-        }
 
-        // Batch update using updateManyById
-        if (toUpdate.length > 0) {
-            try {
-                const updateData = toUpdate.map(({ id, data }) => ({ id, ...data }));
-                updated = await (this as any).updateManyById(updateData);
-            } catch (error) {
-                console.error(`Error in batch update: ${(error as Error).message}`);
-                // Fallback to individual updates
-                for (const { id, data } of toUpdate) {
-                    try {
-                        await entityModel.update({ where: { id }, data });
-                        updated++;
-                    } catch (err) {
-                        console.error(`Failed to update record ${id}: ${(err as Error).message}`);
+            // Batch update using updateManyById
+            if (toUpdate.length > 0) {
+                try {
+                    const updateData = toUpdate.map(({ id, data }) => ({ id, ...data }));
+                    updated = await (this as any).updateManyById(updateData, { parallel: false });
+                } catch (error) {
+                    console.error(`Error in batch update: ${(error as Error).message}`);
+                    // Fallback to individual updates
+                    for (const { id, data } of toUpdate) {
+                        try {
+                            await entityModel.update({ where: { id }, data });
+                            updated++;
+                        } catch (err) {
+                            console.error(`Failed to update record ${id}: ${(err as Error).message}`);
+                        }
                     }
                 }
             }
@@ -842,6 +1083,10 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
     public static async updateManyById(
         this: new (data: any) => BaseEntity<any>,
         dataList: Array<Partial<any>>,
+        options?: {
+            parallel?: boolean;
+            concurrency?: number;
+        }
     ): Promise<number> {
         if (!Array.isArray(dataList) || dataList.length === 0) return 0;
         const prisma = getPrismaInstance();
@@ -862,18 +1107,60 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         }
 
         // SQL databases use optimized batch update query
+        // Create batches
+        const batches: any[][] = [];
         for (let i = 0; i < formattedList.length; i += BaseEntity.BATCH_SIZE) {
-            const batch = formattedList.slice(i, i + BaseEntity.BATCH_SIZE);
-            const { query } = BaseEntity.buildUpdateQuery(batch, tableName, modelInfo);
-            if (!query) continue;
-            try {
-                const result = await (prisma as unknown as PrismaClient).$executeRawUnsafe(query);
-                totalUpdated += result;
-            } catch (error) {
-                console.error(`❌ Error in batch update (${i + 1} - ${Math.min(i + batch.length, formattedList.length)}):`, (error as Error).message);
-                throw new Error(`Error executing batch update query: ${(error as Error).message}`);
+            batches.push(formattedList.slice(i, i + BaseEntity.BATCH_SIZE));
+        }
+        
+        // Determine if we should use parallel execution
+        const useParallel = options?.parallel !== false && 
+                           isParallelEnabled() && 
+                           batches.length > 1;
+        
+        if (useParallel) {
+            // Execute batches in parallel
+            const operations = batches.map((batch, batchIndex) => 
+                async () => {
+                    const { query } = BaseEntity.buildUpdateQuery(batch, tableName, modelInfo);
+                    if (!query) return 0;
+                    
+                    try {
+                        const result = await (prisma as unknown as PrismaClient).$executeRawUnsafe(query);
+                        return result as number;
+                    } catch (error) {
+                        console.error(`❌ Error in batch update ${batchIndex}:`, (error as Error).message);
+                        throw new Error(`Error executing batch update query: ${(error as Error).message}`);
+                    }
+                }
+            );
+            
+            const result = await executeInParallel(operations, {
+                concurrency: options?.concurrency
+            });
+            
+            totalUpdated = result.results.reduce((sum, count) => sum + (count as number), 0);
+            
+            if (result.errors.length > 0) {
+                console.warn(`Warning: ${result.errors.length} batches failed in parallel updateManyById`);
+            }
+        } else {
+            // Execute sequentially (original behavior)
+            for (let i = 0; i < batches.length; i++) {
+                const batch = batches[i];
+                const { query } = BaseEntity.buildUpdateQuery(batch, tableName, modelInfo);
+                if (!query) continue;
+                
+                try {
+                    const result = await (prisma as unknown as PrismaClient).$executeRawUnsafe(query);
+                    totalUpdated += result;
+                } catch (error) {
+                    console.error(`❌ Error in batch update ${i}:`, (error as Error).message);
+                    throw new Error(`Error executing batch update query: ${(error as Error).message}`);
+                }
             }
         }
+        
         return totalUpdated;
     }
 
@@ -1118,6 +1405,88 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             console.error(`Error deleting entities with filter:`, (error as Error).message);
             return 0;
         }
+    }
+
+    /**
+     * Delete multiple entities by their IDs in parallel batches
+     * 
+     * @param ids - Array of IDs to delete
+     * @param options - Parallel execution options
+     * @returns Number of deleted records
+     * 
+     * @example
+     * ```typescript
+     * const deleted = await User.deleteByIds([1, 2, 3, 4, 5], { parallel: true });
+     * console.log(`Deleted ${deleted} users`);
+     * ```
+     */
+    public static async deleteByIds(
+        this: new (data: any) => BaseEntity<any>,
+        ids: any[],
+        options?: {
+            parallel?: boolean;
+            concurrency?: number;
+        }
+    ): Promise<number> {
+        const entityModel = (this as any).model;
+        if (!entityModel) throw new Error("The model is not defined in the BaseEntity class.");
+        if (!Array.isArray(ids) || ids.length === 0) return 0;
+
+        // Create batches
+        const batchSize = getOptimalBatchSize('updateMany'); // Use updateMany as proxy for delete operations
+        const batches: any[][] = [];
+        for (let i = 0; i < ids.length; i += batchSize) {
+            batches.push(ids.slice(i, i + batchSize));
+        }
+
+        // Determine if we should use parallel execution
+        const useParallel = options?.parallel !== false && 
+                           isParallelEnabled() && 
+                           batches.length > 1;
+
+        let totalDeleted = 0;
+
+        if (useParallel) {
+            // Execute batches in parallel
+            const operations = batches.map((batch) => 
+                async () => {
+                    try {
+                        const result = await entityModel.deleteMany({
+                            where: { id: { in: batch } }
+                        });
+                        return result.count || 0;
+                    } catch (error) {
+                        console.error(`❌ Error in delete batch:`, (error as Error).message);
+                        throw error;
+                    }
+                }
+            );
+
+            const result = await executeInParallel(operations, {
+                concurrency: options?.concurrency
+            });
+
+            totalDeleted = result.results.reduce((sum, count) => sum + (count as number), 0);
+
+            if (result.errors.length > 0) {
+                console.warn(`Warning: ${result.errors.length} batches failed in parallel deleteByIds`);
+            }
+        } else {
+            // Execute sequentially
+            for (const batch of batches) {
+                try {
+                    const result = await entityModel.deleteMany({
+                        where: { id: { in: batch } }
+                    });
+                    totalDeleted += result.count || 0;
+                } catch (error) {
+                    console.error(`❌ Error in delete batch:`, (error as Error).message);
+                    throw error;
+                }
+            }
+        }
+
+        return totalDeleted;
     }
 
     toJson(): string {
