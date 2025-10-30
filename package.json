@@ -54,9 +54,9 @@
     "filter",
     "pagination"
   ],
-  "author": "Hector Arrechea <hector.arrechea@ct.uneatlantico.es>",
   "contributors": [
-    "Eduardo Estrada <me@e2rd0.com>"
+    "Eduardo Estrada <me@e2rd0.com> (https://e2rd0.com)",
+    "Hector Arrechea <hector.arrechea@ct.uneatlantico.es>"
   ],
   "license": "MIT",
   "repository": {
