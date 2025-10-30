@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2025-10-30
+
+### Changed
+- **Optimized `executeInParallel()`**: Eliminated nested loops, reduced memory allocations, and removed redundant Promise wrappers faster parallel execution
+
 ## [1.0.1] - 2025-10-30
 
 ### Fixed
