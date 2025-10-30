@@ -6,6 +6,7 @@ module.exports = {
   testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
   testPathIgnorePatterns: [
     '/node_modules/',
+    'benchmark\\.test\\.ts$',
   ],
   testTimeout: 30000,
   moduleFileExtensions: ['ts', 'js', 'json'],
@@ -26,4 +27,5 @@ module.exports = {
   clearMocks: true,
   resetMocks: true,
   restoreMocks: true,
+  maxWorkers: 1,
 };

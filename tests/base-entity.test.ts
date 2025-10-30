@@ -9,9 +9,9 @@ import { configurePrisma, resetPrismaConfiguration } from '../src/config';
 import { mockPrismaClient } from './__mocks__/prisma-client.mock';
 
 interface IBaseEntity {
-    id?: number;
-    createdAt?: Date;
-    updatedAt?: Date;
+  id?: number;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 interface IUser extends IBaseEntity {
@@ -25,9 +25,10 @@ interface IUser extends IBaseEntity {
  * Test User entity class
  * Following the real project pattern: private properties with getters/setters
  */
-class User extends BaseEntity<IUser> {
+class User extends BaseEntity<IUser> implements IUser {
   static override readonly model = mockPrismaClient.user;
 
+  public declare readonly id?: number;
   private _name!: IUser['name'];
   private _email!: IUser['email'];
   private _age: IUser['age'];
@@ -151,9 +152,9 @@ describe('BaseEntity', () => {
      */
     it('should exclude createdAt from update payload', async () => {
       const now = new Date();
-      const user = new User({ 
-        id: 1, 
-        name: 'Updated Name', 
+      const user = new User({
+        id: 1,
+        name: 'Updated Name',
         email: 'updated@example.com',
       });
       (user as any).createdAt = now;
@@ -169,7 +170,7 @@ describe('BaseEntity', () => {
       });
 
       await user.update();
-      
+
       const callArgs = updateSpy.mock.calls[0][0];
       expect(callArgs.data).not.toHaveProperty('createdAt');
     });
@@ -178,9 +179,9 @@ describe('BaseEntity', () => {
      * Test: should exclude updatedAt object from update payload
      */
     it('should exclude updatedAt object from update payload', async () => {
-      const user = new User({ 
-        id: 1, 
-        name: 'Updated Name', 
+      const user = new User({
+        id: 1,
+        name: 'Updated Name',
         email: 'updated@example.com'
       });
       (user as any).updatedAt = { create: {} };
@@ -196,7 +197,7 @@ describe('BaseEntity', () => {
       });
 
       await user.update();
-      
+
       const callArgs = updateSpy.mock.calls[0][0];
       expect(callArgs.data).not.toHaveProperty('updatedAt');
     });
@@ -205,9 +206,9 @@ describe('BaseEntity', () => {
      * Test: should exclude empty objects from update payload
      */
     it('should exclude empty objects from update payload', async () => {
-      const user = new User({ 
-        id: 1, 
-        name: 'Updated Name', 
+      const user = new User({
+        id: 1,
+        name: 'Updated Name',
         email: 'updated@example.com'
       });
       (user as any).emptyField = {};
@@ -223,7 +224,7 @@ describe('BaseEntity', () => {
       });
 
       await user.update();
-      
+
       const callArgs = updateSpy.mock.calls[0][0];
       expect(callArgs.data).not.toHaveProperty('emptyField');
     });

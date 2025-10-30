@@ -96,6 +96,8 @@ if ($Database -ne 'sqlite') {
 # Run tests
 Write-Host "Running tests with $Database..." -ForegroundColor Yellow
 
+$env:SKIP_SCHEMA_PUSH = "true"
+
 npx jest integration --runInBand
 
 $testExitCode = $LASTEXITCODE

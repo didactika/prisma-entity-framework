@@ -5,7 +5,7 @@
  * in entities that extend BaseEntity.
  */
 
-import { BaseEntity, Property } from '../src/index';
+import { BaseEntity, Property } from '../../src/index';
 
 // Example interface
 interface IUser {

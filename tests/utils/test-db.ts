@@ -5,6 +5,12 @@
  */
 
 import { getDatabaseProvider } from '../../src/database-utils';
+import { detectDatabaseProvider, type DatabaseProvider } from './database-detector';
+import { unlinkSync, existsSync } from 'fs';
+import { join } from 'path';
+
+// Track if database has been initialized for this test run
+let databaseInitialized = false;
 
 /**
  * Test database configuration
@@ -12,8 +18,99 @@ import { getDatabaseProvider } from '../../src/database-utils';
 export interface TestDbConfig {
   client: any;
   cleanup: () => Promise<void>;
-  provider: 'sqlite' | 'mysql' | 'postgresql' | 'mongodb';
+  provider: DatabaseProvider;
   supportsSkipDuplicates: boolean;
+}
+
+/**
+ * Cleans up SQLite database files
+ */
+function cleanupSqliteDatabase(): void {
+  const dbPath = join(process.cwd(), 'tests', 'prisma', 'test.db');
+  const journalPath = `${dbPath}-journal`;
+
+  if (existsSync(dbPath)) {
+    try {
+      unlinkSync(dbPath);
+    } catch (error) {
+      // Ignore cleanup errors
+    }
+  }
+
+  if (existsSync(journalPath)) {
+    try {
+      unlinkSync(journalPath);
+    } catch (error) {
+      // Ignore cleanup errors
+    }
+  }
+}
+
+/**
+ * Creates a Prisma client for the specified provider
+ */
+async function createPrismaClient(provider: DatabaseProvider): Promise<any> {
+  if (provider === 'sqlite') {
+    const { PrismaClient } = await import('@prisma/client');
+    const path = await import('path');
+
+    // Use absolute path to ensure database is created in the correct location
+    const dbPath = path.join(process.cwd(), 'tests', 'prisma', 'test.db');
+    const DATABASE_URL = `file:${dbPath}`;
+    process.env.DATABASE_URL = DATABASE_URL;
+
+    return new PrismaClient({
+      datasources: {
+        db: {
+          url: DATABASE_URL,
+        },
+      },
+    });
+  }
+
+  // For other databases, use provider-specific clients
+  const clientPaths: Record<string, string> = {
+    mysql: '../../node_modules/.prisma/client-mysql/index.js',
+    postgresql: '../../node_modules/.prisma/client-postgresql/index.js',
+    mongodb: '../../node_modules/.prisma/client-mongodb/index.js',
+  };
+
+  const clientPath = clientPaths[provider];
+  if (!clientPath) {
+    throw new Error(`Unsupported database provider: ${provider}`);
+  }
+
+  // @ts-ignore - Dynamic import path based on runtime provider
+  const clientModule = await import(clientPath);
+  const { PrismaClient } = clientModule;
+  return new PrismaClient();
+}
+
+/**
+ * Initializes the database schema (only runs once per test session)
+ */
+async function initializeDatabaseSchema(provider: DatabaseProvider): Promise<void> {
+  if (databaseInitialized) {
+    return;
+  }
+
+  // Clean up SQLite database before tests (only for SQLite)
+  if (provider === 'sqlite') {
+    cleanupSqliteDatabase();
+
+    // Push schema for SQLite
+    try {
+      const { execSync } = await import('child_process');
+      execSync('npx prisma db push --schema=tests/prisma/schema.test.prisma --skip-generate --accept-data-loss', {
+        stdio: 'ignore'
+      });
+    } catch (error) {
+      console.error('Failed to push SQLite schema:', error);
+      throw error;
+    }
+  }
+
+  databaseInitialized = true;
 }
 
 /**
@@ -34,58 +131,17 @@ export interface TestDbConfig {
  * ```
  */
 export async function setupTestDatabase(): Promise<TestDbConfig> {
-  // Detect database URL from environment
-  const databaseUrl = process.env.DATABASE_URL;
-  let provider: 'sqlite' | 'mysql' | 'postgresql' | 'mongodb' = 'sqlite';
+  // Use shared database detection logic
+  const { provider, supportsSkipDuplicates } = detectDatabaseProvider();
+
+  // Initialize database schema once
+  await initializeDatabaseSchema(provider);
+
   let client: any;
 
-  // Determine provider from URL
-  if (databaseUrl) {
-    if (databaseUrl.startsWith('mysql://')) {
-      provider = 'mysql';
-    } else if (databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://')) {
-      provider = 'postgresql';
-    } else if (databaseUrl.startsWith('mongodb://') || databaseUrl.startsWith('mongodb+srv://')) {
-      provider = 'mongodb';
-    }
-  }
-
-  // Create Prisma client based on provider using the generated clients with custom output paths
+  // Create Prisma client based on provider
   try {
-    if (provider === 'sqlite') {
-      // Use default Prisma client for SQLite
-      const { PrismaClient } = await import('@prisma/client');
-      
-      // Use file-based SQLite for compatibility - path is relative to schema location
-      const DATABASE_URL = `file:./test.db`;
-      process.env.DATABASE_URL = DATABASE_URL;
-
-      client = new PrismaClient({
-        datasources: {
-          db: {
-            url: DATABASE_URL,
-          },
-        },
-      });
-    } else if (provider === 'mysql') {
-      // Use MySQL-specific Prisma client (generated to node_modules/.prisma/client-mysql)
-      // @ts-ignore - Dynamic import path based on runtime provider
-      const clientModule = await import('../../node_modules/.prisma/client-mysql/index.js');
-      const { PrismaClient } = clientModule;
-      client = new PrismaClient();
-    } else if (provider === 'postgresql') {
-      // Use PostgreSQL-specific Prisma client (generated to node_modules/.prisma/client-postgresql)
-      // @ts-ignore - Dynamic import path based on runtime provider
-      const clientModule = await import('../../node_modules/.prisma/client-postgresql/index.js');
-      const { PrismaClient } = clientModule;
-      client = new PrismaClient();
-    } else {
-      // Use MongoDB-specific Prisma client (generated to node_modules/.prisma/client-mongodb)
-      // @ts-ignore - Dynamic import path based on runtime provider
-      const clientModule = await import('../../node_modules/.prisma/client-mongodb/index.js');
-      const { PrismaClient } = clientModule;
-      client = new PrismaClient();
-    }
+    client = await createPrismaClient(provider);
   } catch (error) {
     console.error(`❌ Failed to initialize test database:`, error);
     throw error;
@@ -98,9 +154,6 @@ export async function setupTestDatabase(): Promise<TestDbConfig> {
     // Verify provider
     const detectedProvider = getDatabaseProvider(client);
     console.log(`✅ Test database initialized (${detectedProvider})`);
-
-    // MySQL and PostgreSQL support skipDuplicates, SQLite and MongoDB do not
-    const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb';
 
     /**
      * Cleanup function to disconnect and clear database
