@@ -21,7 +21,7 @@ module.exports = {
   coverageReporters: ['text', 'lcov', 'html'],
   transform: {
     '^.+\\.ts$': ['ts-jest', {
-      tsconfig: 'tsconfig.test.json',
+      tsconfig: 'tsconfig.json',
     }],
   },
   clearMocks: true,

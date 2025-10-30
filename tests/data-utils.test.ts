@@ -186,6 +186,132 @@ describe('DataUtils', () => {
         author: { connect: { id: 1 } },
       });
     });
+
+    /**
+     * Test: should preserve scalar arrays (String[], Int[], etc.)
+     */
+    it('should preserve scalar arrays without wrapping in connect', () => {
+      const modelInfo = {
+        fields: [
+          { name: 'title', kind: 'scalar', type: 'String', isList: false },
+          { name: 'tags', kind: 'scalar', type: 'String', isList: true }, // String[]
+          { name: 'ratings', kind: 'scalar', type: 'Int', isList: true }, // Int[]
+          { name: 'author', kind: 'object', type: 'User', isList: false },
+        ],
+      };
+
+      const data = {
+        title: 'Post',
+        tags: ['tech', 'news', 'javascript'],
+        ratings: [5, 4, 5, 3],
+        author: { id: 1 },
+      };
+
+      const result = DataUtils.processRelations(data, modelInfo);
+
+      expect(result).toEqual({
+        title: 'Post',
+        tags: ['tech', 'news', 'javascript'], // Scalar array preserved as-is
+        ratings: [5, 4, 5, 3], // Scalar array preserved as-is
+        author: { connect: { id: 1 } }, // Relation processed normally
+      });
+    });
+
+    /**
+     * Test: should preserve ObjectId arrays (MongoDB use case)
+     */
+    it('should preserve ObjectId arrays for MongoDB', () => {
+      const modelInfo = {
+        fields: [
+          { name: 'id', kind: 'scalar', type: 'String', isList: false },
+          { name: 'areaIds', kind: 'scalar', type: 'String', isList: true }, // String[] @db.ObjectId
+          { name: 'categoryIds', kind: 'scalar', type: 'String', isList: true },
+        ],
+      };
+
+      const data = {
+        id: '507f1f77bcf86cd799439011',
+        areaIds: ['507f1f77bcf86cd799439012', '507f1f77bcf86cd799439013'],
+        categoryIds: ['507f1f77bcf86cd799439014'],
+      };
+
+      const result = DataUtils.processRelations(data, modelInfo);
+
+      expect(result).toEqual({
+        id: '507f1f77bcf86cd799439011',
+        areaIds: ['507f1f77bcf86cd799439012', '507f1f77bcf86cd799439013'], // Preserved
+        categoryIds: ['507f1f77bcf86cd799439014'], // Preserved
+      });
+    });
+
+    /**
+     * Test: should handle empty scalar arrays
+     */
+    it('should handle empty scalar arrays', () => {
+      const modelInfo = {
+        fields: [
+          { name: 'tags', kind: 'scalar', type: 'String', isList: true },
+        ],
+      };
+
+      const data = {
+        title: 'Post',
+        tags: [],
+      };
+
+      const result = DataUtils.processRelations(data, modelInfo);
+
+      expect(result.tags).toEqual([]); // Empty array preserved
+    });
+
+    /**
+     * Test: should distinguish between scalar arrays and relation arrays
+     */
+    it('should distinguish between scalar arrays and relation arrays', () => {
+      const modelInfo = {
+        fields: [
+          { name: 'tags', kind: 'scalar', type: 'String', isList: true }, // Scalar array
+          { name: 'comments', kind: 'object', type: 'Comment', isList: true }, // Relation array
+        ],
+      };
+
+      const data = {
+        tags: ['tech', 'news'], // Should be preserved
+        comments: [{ id: 1 }, { id: 2 }], // Should be wrapped in connect
+      };
+
+      const result = DataUtils.processRelations(data, modelInfo);
+
+      expect(result).toEqual({
+        tags: ['tech', 'news'], // Scalar array preserved
+        comments: { connect: [{ id: 1 }, { id: 2 }] }, // Relation array processed
+      });
+    });
+
+    /**
+     * Test: should handle mixed scalar types in arrays
+     */
+    it('should handle mixed scalar types in arrays', () => {
+      const modelInfo = {
+        fields: [
+          { name: 'stringArray', kind: 'scalar', type: 'String', isList: true },
+          { name: 'intArray', kind: 'scalar', type: 'Int', isList: true },
+          { name: 'floatArray', kind: 'scalar', type: 'Float', isList: true },
+          { name: 'boolArray', kind: 'scalar', type: 'Boolean', isList: true },
+        ],
+      };
+
+      const data = {
+        stringArray: ['a', 'b', 'c'],
+        intArray: [1, 2, 3],
+        floatArray: [1.5, 2.5, 3.5],
+        boolArray: [true, false, true],
+      };
+
+      const result = DataUtils.processRelations(data, modelInfo);
+
+      expect(result).toEqual(data); // All scalar arrays preserved
+    });
   });
 
   describe('normalizeRelationsToFK', () => {

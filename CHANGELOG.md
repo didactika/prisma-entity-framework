@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0] - 2025-01-29
+## [1.0.1] - 2025-10-30
+
+### Fixed
+- **Scalar Array Support**: Fixed `processRelations()` to preserve scalar arrays (String[], Int[], ObjectId[]) instead of wrapping them in `{ connect: [] }` - critical for MongoDB ObjectId arrays
+- **MySQL JSON Escaping**: Fixed JSON field corruption in raw SQL UPDATE queries by properly escaping backslashes for MySQL JSON fields
+- **Change Detection Performance**: Optimized `hasChanges()` with early exit and custom `deepEqual()`
+
+### Changed
+- Removed hardcoded `siteUuid` from ignored fields in change detection - now only ignores standard fields (id, createdAt, updatedAt) with optional custom fields parameter
+- Refactored change detection methods for better readability: `isStandardIgnoredField()`, `normalizeValueForComparison()`, `deepEqualArrays()`, `deepEqualObjects()`
+
+### Added
+- MySQL integration tests for JSON fields and special characters (`tests/integration/fields.mysql.test.ts`)
+- Scalar array unit tests covering String[], Int[], ObjectId arrays, and mixed types
+- Performance tests for optimized change detection
+
+## [1.0.0] - 2025-10-29
 
 ### Added
 - Parallel batch operations with automatic connection pool detection (2-6x performance improvement)

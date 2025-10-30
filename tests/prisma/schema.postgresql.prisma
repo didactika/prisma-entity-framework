@@ -51,11 +51,12 @@ model Comment {
 }
 
 model Product {
-  id          Int      @id @default(autoincrement())
-  name        String
-  sku         String   @unique
-  metadata    Json?
-  settings    Json?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  name      String
+  sku       String   @unique
+  tags      String[] @default([])
+  metadata  Json?
+  settings  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

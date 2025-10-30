@@ -5,20 +5,27 @@ export default class DataUtils {
     /**
      * Processes relational data by transforming nested objects and arrays into Prisma-compatible formats.
      * Converts objects into `connect` or `create` structures for relational integrity.
-     * JSON fields are preserved as-is without wrapping in connect/create.
+     * JSON fields and scalar arrays are preserved as-is without wrapping in connect/create.
      * @param data The original data object containing relations.
-     * @param modelInfo Optional model information to detect JSON fields
+     * @param modelInfo Optional model information to detect JSON fields and scalar arrays
      * @returns A transformed object formatted for Prisma operations.
      */
     public static processRelations(data: Record<string, any>, modelInfo?: any): Record<string, any> {
         const processedData = { ...data };
 
-        // Build a set of JSON field names for quick lookup
+        // Build sets for quick lookup
         const jsonFields = new Set<string>();
+        const scalarArrayFields = new Set<string>();
+
         if (modelInfo?.fields) {
             for (const field of modelInfo.fields) {
+                // Track JSON/Bytes fields
                 if (field.kind === 'scalar' && (field.type === 'Json' || field.type === 'Bytes')) {
                     jsonFields.add(field.name);
+                }
+                // Track scalar arrays (String[], Int[], etc.) - these should not be processed as relations
+                if (field.kind === 'scalar' && field.isList === true) {
+                    scalarArrayFields.add(field.name);
                 }
             }
         }
@@ -31,6 +38,13 @@ export default class DataUtils {
             // Skip processing if this is a JSON field
             if (jsonFields.has(key)) {
                 // Keep JSON fields as-is
+                processedData[key] = value;
+                continue;
+            }
+
+            // Skip processing if this is a scalar array (e.g., String[], Int[])
+            if (scalarArrayFields.has(key)) {
+                // Keep scalar arrays as-is
                 processedData[key] = value;
                 continue;
             }
@@ -70,7 +84,7 @@ export default class DataUtils {
         data: Record<string, any>,
         keyTransformTemplate: (relationName: string) => string = (key) => `${key}Id`
     ): Record<string, any> {
-        const flatData = {...data};
+        const flatData = { ...data };
 
         for (const [key, value] of Object.entries(flatData)) {
             if (

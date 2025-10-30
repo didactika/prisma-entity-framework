@@ -73,10 +73,10 @@ describe('Performance Utils', () => {
         it('should split array into optimal batches', () => {
             const items = Array.from({ length: 1000 }, (_, i) => i);
             const batches = createOptimalBatches(items, 'createMany');
-            
+
             expect(batches.length).toBeGreaterThan(0);
             expect(batches.every(batch => batch.length > 0)).toBe(true);
-            
+
             // Verify all items are included
             const totalItems = batches.reduce((sum, batch) => sum + batch.length, 0);
             expect(totalItems).toBe(1000);
@@ -85,7 +85,7 @@ describe('Performance Utils', () => {
         it('should handle small arrays', () => {
             const items = [1, 2, 3];
             const batches = createOptimalBatches(items, 'createMany');
-            
+
             expect(batches.length).toBe(1);
             expect(batches[0]).toEqual([1, 2, 3]);
         });
@@ -93,7 +93,7 @@ describe('Performance Utils', () => {
         it('should handle empty arrays', () => {
             const items: number[] = [];
             const batches = createOptimalBatches(items, 'createMany');
-            
+
             expect(batches.length).toBe(0);
         });
     });
@@ -101,7 +101,7 @@ describe('Performance Utils', () => {
     describe('createBatchMetrics', () => {
         it('should create metrics with correct initial values', () => {
             const metrics = createBatchMetrics(1000, 100);
-            
+
             expect(metrics.totalItems).toBe(1000);
             expect(metrics.batchCount).toBe(10);
             expect(metrics.avgBatchSize).toBe(100);
@@ -111,12 +111,12 @@ describe('Performance Utils', () => {
 
         it('should calculate duration and throughput on complete', () => {
             const metrics = createBatchMetrics(1000, 100) as any;
-            
+
             // Simulate some work
             const startTime = metrics.startTime;
             setTimeout(() => {
                 metrics.complete();
-                
+
                 expect(metrics.endTime).toBeGreaterThan(startTime);
                 expect(metrics.durationMs).toBeGreaterThan(0);
                 expect(metrics.itemsPerSecond).toBeGreaterThan(0);
@@ -133,7 +133,7 @@ describe('Performance Utils', () => {
             };
 
             const result = await withRetry(operation, { maxRetries: 3 });
-            
+
             expect(result).toBe('success');
             expect(attempts).toBe(1);
         });
@@ -148,12 +148,12 @@ describe('Performance Utils', () => {
                 return 'success';
             };
 
-            const result = await withRetry(operation, { 
+            const result = await withRetry(operation, {
                 maxRetries: 3,
                 initialDelayMs: 10,
                 maxDelayMs: 100
             });
-            
+
             expect(result).toBe('success');
             expect(attempts).toBe(3);
         });
@@ -167,7 +167,7 @@ describe('Performance Utils', () => {
 
             await expect(withRetry(operation, { maxRetries: 3 }))
                 .rejects.toThrow('Invalid data');
-            
+
             expect(attempts).toBe(1);
         });
 
@@ -178,11 +178,11 @@ describe('Performance Utils', () => {
                 throw new Error('Connection timeout');
             };
 
-            await expect(withRetry(operation, { 
+            await expect(withRetry(operation, {
                 maxRetries: 2,
                 initialDelayMs: 10
             })).rejects.toThrow('Connection timeout');
-            
+
             expect(attempts).toBe(3); // Initial + 2 retries
         });
     });
@@ -191,7 +191,7 @@ describe('Performance Utils', () => {
         it('should chunk array into specified size', () => {
             const array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
             const chunks = chunk(array, 3);
-            
+
             expect(chunks).toEqual([
                 [1, 2, 3],
                 [4, 5, 6],
@@ -203,21 +203,21 @@ describe('Performance Utils', () => {
         it('should handle array smaller than chunk size', () => {
             const array = [1, 2];
             const chunks = chunk(array, 5);
-            
+
             expect(chunks).toEqual([[1, 2]]);
         });
 
         it('should handle empty array', () => {
             const array: number[] = [];
             const chunks = chunk(array, 5);
-            
+
             expect(chunks).toEqual([]);
         });
 
         it('should handle chunk size of 1', () => {
             const array = [1, 2, 3];
             const chunks = chunk(array, 1);
-            
+
             expect(chunks).toEqual([[1], [2], [3]]);
         });
     });
@@ -233,7 +233,7 @@ describe('Performance Utils', () => {
 
         it('should have all operation types for each provider', () => {
             const providers = Object.keys(BATCH_SIZE_CONFIG);
-            
+
             providers.forEach(provider => {
                 const config = (BATCH_SIZE_CONFIG as any)[provider];
                 expect(config.createMany).toBeGreaterThan(0);

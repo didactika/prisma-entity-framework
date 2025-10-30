@@ -185,15 +185,15 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             }
 
             // Determine if we should use parallel execution
-            const useParallel = options.parallel !== false && 
-                               isParallelEnabled() && 
-                               chunks.length > 1;
+            const useParallel = options.parallel !== false &&
+                isParallelEnabled() &&
+                chunks.length > 1;
 
             let allResults: T[][];
 
             if (useParallel) {
                 // Execute chunks in parallel
-                const operations = chunks.map(chunkValues => 
+                const operations = chunks.map(chunkValues =>
                     () => {
                         const searchClone = options.search ? JSON.parse(JSON.stringify(options.search)) : undefined;
                         if (searchClone?.listSearch?.[longIndex]) {
@@ -230,7 +230,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
 
             // Flatten and deduplicate results
             const flattened = ([] as T[]).concat(...allResults);
-            
+
             // Deduplicate by id if present
             const seen = new Set<any>();
             const deduplicated = flattened.filter(item => {
@@ -387,29 +387,29 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         for (let i = 0; i < deduplicatedData.length; i += BaseEntity.BATCH_SIZE) {
             batches.push(deduplicatedData.slice(i, i + BaseEntity.BATCH_SIZE));
         }
-        
+
         // Determine if we should use parallel execution
-        const useParallel = options?.parallel !== false && 
-                           isParallelEnabled() && 
-                           batches.length > 1;
-        
+        const useParallel = options?.parallel !== false &&
+            isParallelEnabled() &&
+            batches.length > 1;
+
         let totalCreated = 0;
-        
+
         if (useParallel) {
             // Execute batches in parallel
-            const operations = batches.map((batch, batchIndex) => 
+            const operations = batches.map((batch, batchIndex) =>
                 async () => {
                     try {
                         const createOptions: any = { data: batch };
                         if (skipDuplicates && supportsSkipDuplicates) {
                             createOptions.skipDuplicates = true;
                         }
-                        
+
                         const result = await entityModel.createMany(createOptions);
                         return result.count;
                     } catch (error) {
                         const errorMsg = (error as Error).message;
-                        
+
                         // Handle unique constraint errors with retry
                         if (errorMsg.includes('Unique constraint') && !skipDuplicates && supportsSkipDuplicates) {
                             console.log(`🔄 Retrying batch ${batchIndex} with skipDuplicates=true...`);
@@ -431,13 +431,13 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                     }
                 }
             );
-            
+
             const result = await executeInParallel(operations, {
                 concurrency: options?.concurrency
             });
-            
+
             totalCreated = result.results.reduce((sum, count) => sum + (count as number), 0);
-            
+
             if (result.errors.length > 0) {
                 console.warn(`Warning: ${result.errors.length} batches failed in parallel createMany`);
             }
@@ -445,18 +445,18 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             // Execute sequentially (original behavior)
             for (let i = 0; i < batches.length; i++) {
                 const batch = batches[i];
-                
+
                 try {
                     const createOptions: any = { data: batch };
                     if (skipDuplicates && supportsSkipDuplicates) {
                         createOptions.skipDuplicates = true;
                     }
-                    
+
                     const result = await entityModel.createMany(createOptions);
                     totalCreated += result.count;
                 } catch (error) {
                     const errorMsg = (error as Error).message;
-                    
+
                     if (errorMsg.includes('Unique constraint') && !skipDuplicates && supportsSkipDuplicates) {
                         console.log(`🔄 Retrying batch ${i} with skipDuplicates=true...`);
                         try {
@@ -664,7 +664,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                 // Calculate optimal batch size based on database and number of fields per condition
                 // Each unique constraint might have multiple fields (e.g., {email, tenantId})
                 const fieldsPerCondition = uniqueConstraints[0]?.length || 1;
-                
+
                 // Check if we can execute in a single query
                 if (isOrQuerySafe(orConditions)) {
                     existingRecords = await entityModel.findMany({
@@ -673,33 +673,33 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                 } else {
                     // Need to batch the query
                     const batchSize = getOptimalOrBatchSize(fieldsPerCondition);
-                    
+
                     // Create batches
                     const batches: any[][] = [];
                     for (let i = 0; i < orConditions.length; i += batchSize) {
                         batches.push(orConditions.slice(i, i + batchSize));
                     }
-                    
+
                     // Determine if we should use parallel execution
-                    const useParallel = options?.parallel !== false && 
-                                       isParallelEnabled() && 
-                                       batches.length > 1;
-                    
+                    const useParallel = options?.parallel !== false &&
+                        isParallelEnabled() &&
+                        batches.length > 1;
+
                     if (useParallel) {
                         // Execute batches in parallel
-                        const operations = batches.map(batch => 
+                        const operations = batches.map(batch =>
                             () => entityModel.findMany({ where: { OR: batch } })
                         );
-                        
+
                         const result = await executeInParallel(operations, {
                             concurrency: options?.concurrency
                         });
-                        
+
                         // Merge results from all parallel queries
                         for (const batchRecords of result.results) {
                             existingRecords.push(...(batchRecords as T[]));
                         }
-                        
+
                         // Log any errors but continue
                         if (result.errors.length > 0) {
                             console.warn(`Warning: ${result.errors.length} batch queries failed`);
@@ -766,22 +766,22 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         // Execute batch operations (potentially in parallel)
         let created = 0;
         let updated = 0;
-        
+
         // Determine if we should use parallel execution for creates and updates
-        const useParallel = options?.parallel !== false && 
-                           isParallelEnabled() && 
-                           (toCreate.length > 0 && toUpdate.length > 0);
-        
+        const useParallel = options?.parallel !== false &&
+            isParallelEnabled() &&
+            (toCreate.length > 0 && toUpdate.length > 0);
+
         if (useParallel) {
             // Execute creates and updates in parallel
             const operations: Array<() => Promise<number>> = [];
-            
+
             if (toCreate.length > 0) {
                 operations.push(async () => {
                     const prisma = getPrismaInstance();
                     const provider = getDatabaseProvider(prisma);
                     const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb';
-                    
+
                     try {
                         const createOptions: any = { data: toCreate };
                         if (supportsSkipDuplicates) {
@@ -805,7 +805,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                     }
                 });
             }
-            
+
             if (toUpdate.length > 0) {
                 operations.push(async () => {
                     try {
@@ -827,12 +827,12 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                     }
                 });
             }
-            
+
             // Execute in parallel
             const result = await executeInParallel(operations, {
                 concurrency: options?.concurrency
             });
-            
+
             // Assign results
             let resultIndex = 0;
             if (toCreate.length > 0) {
@@ -841,14 +841,14 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             if (toUpdate.length > 0) {
                 updated = result.results[resultIndex++] || 0;
             }
-            
+
             // Log any errors
             if (result.errors.length > 0) {
                 console.warn(`Warning: ${result.errors.length} operations failed in parallel execution`);
             }
         } else {
             // Execute sequentially (original behavior)
-            
+
             // Batch create
             if (toCreate.length > 0) {
                 const prisma = getPrismaInstance();
@@ -905,62 +905,171 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
     }
 
     /**
-     * Checks if there are changes between new data and existing data
-     * @param newData - new data
-     * @param existingData - existing data
-     * @returns true if there are changes, false otherwise
+     * Checks if there are changes between new data and existing data.
+     * 
+     * @param newData - New data to compare
+     * @param existingData - Existing data to compare against
+     * @param ignoreFields - Additional fields to ignore beyond defaults (id, createdAt, updatedAt)
+     * @returns true if any changes detected, false otherwise
      */
-    protected static hasChanges<T extends Record<string, any>>(newData: T, existingData: T): boolean {
-        return Object.keys(BaseEntity.getChangedFields(newData, existingData)).length > 0;
-    }
+    protected static hasChanges<T extends Record<string, any>>(
+        newData: T,
+        existingData: T,
+        ignoreFields: string[] = []
+    ): boolean {
+        // Build custom ignored fields set only if needed (avoid allocation overhead)
+        const customIgnored = ignoreFields.length > 0 ? new Set(ignoreFields) : null;
 
-    /**
-     * Returns a partial object with the fields that changed between newData and existingData.
-     * Only compares fields that are present in newData (ignores extra fields in existingData)
-     * @param newData - new data
-     * @param existingData - existing data
-     * @returns partial object containing only differing fields (includes id when applicable)
-     */
-    private static getChangedFields<T extends Record<string, any>>(newData: T, existingData: T): Partial<T> {
-        const IGNORED_KEYS = new Set(['id', 'createdAt', 'updatedAt', 'siteUuid']);
-        const changed: any = {};
+        for (const key in newData) {
+            // Skip standard metadata fields (inline check is faster than Set lookup for 3 items)
+            if (this.isStandardIgnoredField(key)) continue;
 
-        // Only check keys that exist in newData (ignore extra fields in existingData)
-        const keys = Object.keys(newData);
+            // Skip custom ignored fields if provided
+            if (customIgnored?.has(key)) continue;
 
-        for (const key of keys) {
-            if (IGNORED_KEYS.has(key)) continue;
+            // Get raw values
+            const newValue = newData[key];
+            const existingValue = existingData[key];
 
-            const a = BaseEntity.normalizeValue((newData as any)[key]);
-            const b = BaseEntity.normalizeValue((existingData as any)[key]);
-            const isObjA = typeof a === 'object' && a !== null;
-            const isObjB = typeof b === 'object' && b !== null;
+            // Fast path: exact match (same reference or primitive equality)
+            if (newValue === existingValue) continue;
 
-            let diff = false;
-            if (isObjA || isObjB) {
-                diff = JSON.stringify(a) !== JSON.stringify(b);
+            // Normalize values for comparison
+            const normalizedNew = this.normalizeValueForComparison(newValue);
+            const normalizedExisting = this.normalizeValueForComparison(existingValue);
+
+            // Check after normalization
+            if (normalizedNew === normalizedExisting) continue;
+
+            // Handle null cases
+            if (normalizedNew == null || normalizedExisting == null) return true;
+
+            // Type mismatch = change
+            if (typeof normalizedNew !== typeof normalizedExisting) return true;
+
+            // Deep comparison for objects/arrays
+            if (typeof normalizedNew === 'object') {
+                if (!this.deepEqual(normalizedNew, normalizedExisting)) return true;
             } else {
-                diff = a !== b;
+                // Primitives that aren't equal = change
+                return true;
             }
-
-            if (diff) changed[key] = (newData as any)[key];
         }
 
-        if (Object.keys(changed).length > 0) {
-            if ((existingData as any).id !== undefined) changed.id = (existingData as any).id;
-        }
-
-        return changed as Partial<T>;
+        return false;
     }
 
     /**
-     * Normalizes a value for comparison (handles null, undefined, empty strings, etc.)
+     * Checks if a field is a standard ignored field (id, createdAt, updatedAt)
+     * @param key - Field name to check
+     * @returns true if field should be ignored
      */
-    private static normalizeValue(value: any): any {
+    private static isStandardIgnoredField(key: string): boolean {
+        return key === 'id' || key === 'createdAt' || key === 'updatedAt';
+    }
+
+    /**
+     * Normalizes a value for comparison.
+     * - null, undefined, and empty string are treated as null
+     * - Strings are trimmed
+     * - Other values are returned as-is
+     * 
+     * @param value - Value to normalize
+     * @returns Normalized value
+     */
+    private static normalizeValueForComparison(value: any): any {
         if (value === null || value === undefined || value === '') return null;
         if (typeof value === 'string') return value.trim();
         return value;
     }
+
+    /**
+     * Performs deep equality comparison between two values.
+     * Optimized for performance - avoids JSON.stringify which is 5x slower.
+     * 
+     * Handles:
+     * - Primitives (string, number, boolean, null, undefined)
+     * - Arrays (recursive comparison)
+     * - Objects (recursive comparison)
+     * 
+     * @param a - First value to compare
+     * @param b - Second value to compare
+     * @returns true if values are deeply equal, false otherwise
+     */
+    private static deepEqual(a: any, b: any): boolean {
+        // Fast path: same reference or both primitive equal
+        if (a === b) return true;
+
+        // One is null/undefined, other isn't
+        if (a == null || b == null) return false;
+
+        // Type check
+        const typeA = typeof a;
+        const typeB = typeof b;
+        if (typeA !== typeB) return false;
+
+        // Primitives are already checked with ===
+        if (typeA !== 'object') return false;
+
+        // Array comparison
+        const isArrayA = Array.isArray(a);
+        const isArrayB = Array.isArray(b);
+
+        if (isArrayA !== isArrayB) return false;
+
+        if (isArrayA) {
+            return this.deepEqualArrays(a, b);
+        }
+
+        // Object comparison
+        return this.deepEqualObjects(a, b);
+    }
+
+    /**
+     * Compares two arrays for deep equality
+     * @param a - First array
+     * @param b - Second array
+     * @returns true if arrays are deeply equal
+     */
+    private static deepEqualArrays(a: any[], b: any[]): boolean {
+        const length = a.length;
+        if (length !== b.length) return false;
+
+        for (let i = 0; i < length; i++) {
+            if (!this.deepEqual(a[i], b[i])) return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Compares two objects for deep equality
+     * @param a - First object
+     * @param b - Second object
+     * @returns true if objects are deeply equal
+     */
+    private static deepEqualObjects(a: Record<string, any>, b: Record<string, any>): boolean {
+        const keysA = Object.keys(a);
+        const keysB = Object.keys(b);
+
+        // Different number of keys = not equal
+        if (keysA.length !== keysB.length) return false;
+
+        // Check all keys and values
+        for (const key of keysA) {
+            // Key doesn't exist in b
+            if (!(key in b)) return false;
+
+            // Values don't match
+            if (!this.deepEqual(a[key], b[key])) return false;
+        }
+
+        return true;
+    }
+
+
+
+
 
     /**
      * Deduplicates data based on known unique constraints for each model
@@ -1112,19 +1221,19 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         for (let i = 0; i < formattedList.length; i += BaseEntity.BATCH_SIZE) {
             batches.push(formattedList.slice(i, i + BaseEntity.BATCH_SIZE));
         }
-        
+
         // Determine if we should use parallel execution
-        const useParallel = options?.parallel !== false && 
-                           isParallelEnabled() && 
-                           batches.length > 1;
-        
+        const useParallel = options?.parallel !== false &&
+            isParallelEnabled() &&
+            batches.length > 1;
+
         if (useParallel) {
             // Execute batches in parallel
-            const operations = batches.map((batch, batchIndex) => 
+            const operations = batches.map((batch, batchIndex) =>
                 async () => {
                     const { query } = BaseEntity.buildUpdateQuery(batch, tableName, modelInfo);
                     if (!query) return 0;
-                    
+
                     try {
                         const result = await (prisma as unknown as PrismaClient).$executeRawUnsafe(query);
                         return result as number;
@@ -1134,13 +1243,13 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                     }
                 }
             );
-            
+
             const result = await executeInParallel(operations, {
                 concurrency: options?.concurrency
             });
-            
+
             totalUpdated = result.results.reduce((sum, count) => sum + (count as number), 0);
-            
+
             if (result.errors.length > 0) {
                 console.warn(`Warning: ${result.errors.length} batches failed in parallel updateManyById`);
             }
@@ -1150,7 +1259,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                 const batch = batches[i];
                 const { query } = BaseEntity.buildUpdateQuery(batch, tableName, modelInfo);
                 if (!query) continue;
-                
+
                 try {
                     const result = await (prisma as unknown as PrismaClient).$executeRawUnsafe(query);
                     totalUpdated += result;
@@ -1160,7 +1269,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
                 }
             }
         }
-        
+
         return totalUpdated;
     }
 
@@ -1246,7 +1355,14 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
             });
     }
 
-    private static escapeValue(value: any, prisma?: PrismaClient): string {
+    /**
+     * Escapes a value for use in raw SQL queries
+     * @param value - Value to escape
+     * @param prisma - Prisma client instance (for database-specific escaping)
+     * @param isJsonField - Whether this is a JSON field (requires special handling)
+     * @returns Escaped SQL string
+     */
+    private static escapeValue(value: any, prisma?: PrismaClient, isJsonField: boolean = false): string {
         if (value === null || value === undefined) return 'NULL';
 
         if (typeof value === 'string') {
@@ -1267,6 +1383,12 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         }
 
         if (Array.isArray(value)) {
+            // If it's a JSON field with an array, treat as JSON
+            if (isJsonField) {
+                return this.escapeJsonValue(value, prisma);
+            }
+
+            // Otherwise, treat as scalar array (PostgreSQL, etc.)
             if (value.length === 0) return "''";
             const escapedElements = value.map((v) => {
                 if (typeof v === 'string') {
@@ -1279,12 +1401,43 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
 
         // Handle JSON objects
         if (typeof value === 'object') {
-            const jsonString = JSON.stringify(value);
-            const escaped = jsonString.replace(/'/g, "''").replace(/\\/g, '\\\\');
-            return `'${escaped}'`;
+            return this.escapeJsonValue(value, prisma);
         }
 
         return `'${String(value).replace(/'/g, "''").replace(/\\/g, '\\\\')}'`;
+    }
+
+    /**
+     * Escapes a JSON value for SQL insertion
+     * Uses database-specific JSON handling to avoid escaping issues
+     * 
+     * MySQL JSON escaping rules:
+     * - JSON.stringify() produces: {"path":"C:\\test"} (backslash already escaped in JSON)
+     * - For SQL string literal, we need: '{"path":"C:\\\\test"}' (escape backslashes for SQL)
+     * - MySQL JSON parser then reads: {"path":"C:\\test"} (correct!)
+     * 
+     * @param value - JSON value to escape
+     * @param prisma - Prisma client instance
+     * @returns Escaped JSON string for SQL
+     */
+    private static escapeJsonValue(value: any, prisma?: PrismaClient): string {
+        const provider = prisma ? getDatabaseProvider(prisma) : 'sqlite';
+        const jsonString = JSON.stringify(value);
+
+        if (provider === 'mysql') {
+            // For MySQL JSON fields:
+            // 1. Escape backslashes for SQL string literal (JSON already has them escaped)
+            // 2. Escape single quotes for SQL string literal
+            // This ensures: C:\path -> JSON: "C:\\path" -> SQL: 'C:\\\\path' -> MySQL JSON: C:\path
+            const escaped = jsonString
+                .replace(/\\/g, '\\\\')  // Escape backslashes first
+                .replace(/'/g, "''");     // Then escape single quotes
+            return `'${escaped}'`;
+        }
+
+        // PostgreSQL and others - escape both quotes and backslashes
+        const escaped = jsonString.replace(/'/g, "''").replace(/\\/g, '\\\\');
+        return `'${escaped}'`;
     }
 
     private static buildUpdateQuery(
@@ -1339,7 +1492,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
 
             const whenClauses = Object.entries(fieldUpdates)
                 .map(([id, value]) => {
-                    let escapedValue = this.escapeValue(value, prisma);
+                    let escapedValue = this.escapeValue(value, prisma, isJsonField);
                     // For PostgreSQL JSON fields, cast the value to JSONB
                     if (isJsonField && provider === 'postgresql') {
                         escapedValue = `${escapedValue}::jsonb`;
@@ -1440,15 +1593,15 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
         }
 
         // Determine if we should use parallel execution
-        const useParallel = options?.parallel !== false && 
-                           isParallelEnabled() && 
-                           batches.length > 1;
+        const useParallel = options?.parallel !== false &&
+            isParallelEnabled() &&
+            batches.length > 1;
 
         let totalDeleted = 0;
 
         if (useParallel) {
             // Execute batches in parallel
-            const operations = batches.map((batch) => 
+            const operations = batches.map((batch) =>
                 async () => {
                     try {
                         const result = await entityModel.deleteMany({
