@@ -360,7 +360,7 @@ export default abstract class BaseEntity<TModel extends Record<string, any>> imp
 
         const prisma = getPrismaInstance();
         const provider = getDatabaseProvider(prisma);
-        const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb';
+        const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb' && provider != 'sqlserver';
 
         let modelInfo: any = null;
         try {
