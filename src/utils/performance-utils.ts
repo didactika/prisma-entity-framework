@@ -2,66 +2,13 @@
  * Performance utilities for optimizing batch operations
  */
 
-import { getDatabaseProvider } from './database-utils';
-import { getPrismaInstance } from './config';
+import { getDatabaseProviderCached } from './database-utils';
+import { getPrismaInstance } from '../config';
+import { getOptimalBatchSize } from './batch-utils';
 
-/**
- * Database-specific batch size configurations
- */
-export const BATCH_SIZE_CONFIG = {
-    sqlite: {
-        createMany: 500,
-        updateMany: 500,
-        transaction: 100,
-    },
-    mysql: {
-        createMany: 1500,
-        updateMany: 1500,
-        transaction: 1000,
-    },
-    postgresql: {
-        createMany: 1500,
-        updateMany: 1500,
-        transaction: 1000,
-    },
-    sqlserver: {
-        createMany: 1000,
-        updateMany: 1000,
-        transaction: 1000,
-    },
-    mongodb: {
-        createMany: 1000,
-        updateMany: 100, // Smaller for transactions
-        transaction: 100, // MongoDB transaction limits
-    },
-} as const;
-
-/**
- * Get optimal batch size for a specific operation and database
- * 
- * @param operation - The type of operation (createMany, updateMany, transaction)
- * @returns Optimal batch size for the current database
- * 
- * @example
- * ```typescript
- * const batchSize = getOptimalBatchSize('createMany');
- * for (let i = 0; i < items.length; i += batchSize) {
- *   const batch = items.slice(i, i + batchSize);
- *   await model.createMany({ data: batch });
- * }
- * ```
- */
-export function getOptimalBatchSize(operation: 'createMany' | 'updateMany' | 'transaction'): number {
-    try {
-        const prisma = getPrismaInstance();
-        const provider = getDatabaseProvider(prisma);
-        return BATCH_SIZE_CONFIG[provider][operation];
-    } catch (error) {
-        // Fallback to conservative defaults if detection fails
-        console.warn('Could not detect database provider, using default batch size');
-        return operation === 'transaction' ? 100 : 500;
-    }
-}
+// Re-export batch size configuration and optimal batch size from batch-utils for backward compatibility
+export { getOptimalBatchSize, BATCH_SIZE_CONFIG } from './batch-utils';
+export type { BatchProcessingOptions, BatchProcessingResult } from './batch-utils';
 
 /**
  * Estimate memory usage for a batch operation
@@ -234,6 +181,7 @@ export async function withRetry<T>(
                 throw lastError;
             }
 
+            // Log retry attempt (using console.warn for operational visibility during retries)
             console.warn(`⚠️  Attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
             await new Promise(resolve => setTimeout(resolve, delay));
             
@@ -316,7 +264,7 @@ export function getOptimalOrBatchSize(
 ): number {
     try {
         const prisma = getPrismaInstance();
-        const provider = getDatabaseProvider(prisma);
+        const provider = getDatabaseProviderCached(prisma);
         const limits = DATABASE_LIMITS[provider];
 
         // Calculate max conditions based on placeholder limit
@@ -329,7 +277,7 @@ export function getOptimalOrBatchSize(
         // Return at least 1, but no more than a reasonable upper limit
         return Math.max(1, Math.min(safeMaxConditions, 10000));
     } catch (error) {
-        // Fallback to conservative default if detection fails
+        // Fallback to conservative default if detection fails (using console.warn for configuration issues)
         console.warn('Could not detect database provider for OR batch size, using conservative default');
         // Conservative default: assume 2 fields per condition, MySQL-like limit
         return Math.floor((65535 / Math.max(fieldsPerCondition, 1)) * 0.8);
@@ -390,7 +338,7 @@ export function isOrQuerySafe(
 ): boolean {
     try {
         const prisma = getPrismaInstance();
-        const provider = getDatabaseProvider(prisma);
+        const provider = getDatabaseProviderCached(prisma);
         const limits = DATABASE_LIMITS[provider];
 
         const totalPlaceholders = calculateOrPlaceholders(orConditions);

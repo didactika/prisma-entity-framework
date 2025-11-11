@@ -5,7 +5,7 @@
  * concurrency, error handling, and performance metrics.
  */
 
-import { getMaxConcurrency, getRateLimiter } from './config';
+import { getMaxConcurrency, getRateLimiter } from '../config';
 
 /**
  * Options for parallel execution
@@ -246,8 +246,14 @@ export async function executeInParallel<T>(
     // For small operation counts or concurrency of 1, use simple sequential/chunked approach
     if (concurrency >= totalOps) {
         // All operations can run in parallel - single batch
-        const settled = await Promise.all(
-            operations.map(async (operation, index): Promise<OpResult> => {
+        // Pre-allocate promises array for better performance
+        const promises: Promise<OpResult>[] = new Array(totalOps);
+        
+        for (let i = 0; i < totalOps; i++) {
+            const operation = operations[i];
+            const index = i;
+            
+            promises[i] = (async (): Promise<OpResult> => {
                 const operationStart = Date.now();
 
                 try {
@@ -260,8 +266,10 @@ export async function executeInParallel<T>(
                     if (hasErrorCallback) options!.onError!(err, index);
                     return { success: false, error: err, index };
                 }
-            })
-        );
+            })();
+        }
+        
+        const settled = await Promise.all(promises);
 
         // Process results in order
         for (const result of settled) {
@@ -279,11 +287,16 @@ export async function executeInParallel<T>(
 
         for (let i = 0; i < totalOps; i += concurrency) {
             const chunkEnd = Math.min(i + concurrency, totalOps);
+            const chunkSize = chunkEnd - i;
 
-            // Execute chunk in parallel - slice is optimized in V8
-            const chunkResults = await Promise.all(
-                operations.slice(i, chunkEnd).map(async (operation, offset): Promise<OpResult> => {
-                    const index = i + offset;
+            // Pre-allocate promises array for better performance
+            const chunkPromises: Promise<OpResult>[] = new Array(chunkSize);
+            
+            for (let offset = 0; offset < chunkSize; offset++) {
+                const operation = operations[i + offset];
+                const index = i + offset;
+                
+                chunkPromises[offset] = (async (): Promise<OpResult> => {
                     const operationStart = Date.now();
 
                     try {
@@ -296,8 +309,10 @@ export async function executeInParallel<T>(
                         if (hasErrorCallback) options!.onError!(err, index);
                         return { success: false, error: err, index };
                     }
-                })
-            );
+                })();
+            }
+
+            const chunkResults = await Promise.all(chunkPromises);
 
             // Process chunk results in order
             for (const result of chunkResults) {
@@ -427,6 +442,7 @@ export function getOptimalConcurrency(
 export function shouldUseParallel(itemCount: number, poolSize: number): boolean {
     // Too small for parallel benefit
     if (itemCount < 100) {
+        // Using console.warn for operational guidance (not an error condition)
         console.warn('⚠️ Dataset too small for parallel execution benefit. Using sequential.');
         return false;
     }

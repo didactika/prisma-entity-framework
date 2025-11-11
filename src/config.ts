@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
-import { RateLimiter, createRateLimiter } from './rate-limiter';
+import { RateLimiter, createRateLimiter } from './utils/rate-limiter';
+import { getDatabaseProvider } from './utils/database-utils';
 
 /**
  * Configuration options for Prisma Entity Framework
@@ -144,31 +145,7 @@ export function resetPrismaConfiguration(): void {
     };
 }
 
-/**
- * Get the database provider from Prisma client
- * @internal
- */
-function getDatabaseProvider(prisma: PrismaClient): string {
-    try {
-        // Try to access internal Prisma configuration
-        const datasources = (prisma as any)?._engineConfig?.datasources;
-        if (datasources && datasources.length > 0) {
-            return datasources[0].activeProvider || 'unknown';
-        }
-        
-        // Fallback: try to detect from DATABASE_URL
-        const url = process.env.DATABASE_URL || '';
-        if (url.startsWith('postgresql://') || url.startsWith('postgres://')) return 'postgresql';
-        if (url.startsWith('mysql://')) return 'mysql';
-        if (url.startsWith('mongodb://') || url.startsWith('mongodb+srv://')) return 'mongodb';
-        if (url.startsWith('sqlserver://')) return 'sqlserver';
-        if (url.includes('file:') || url.includes('.db')) return 'sqlite';
-        
-        return 'unknown';
-    } catch {
-        return 'unknown';
-    }
-}
+
 
 /**
  * Detect connection pool size from Prisma configuration
@@ -248,11 +225,11 @@ export function getConnectionPoolSize(): number {
         // Default pool sizes by database provider
         const provider = getDatabaseProvider(prisma);
         const defaultPoolSizes: Record<string, number> = {
-            postgresql: 10,  // PostgreSQL default
-            mysql: 10,       // MySQL default
+            postgresql: 8,  // PostgreSQL default
+            mysql: 8,       // MySQL default
             sqlite: 1,       // SQLite is single-threaded
-            sqlserver: 10,   // SQL Server default
-            mongodb: 10,     // MongoDB default
+            sqlserver: 8,   // SQL Server default
+            mongodb: 2,      // MongoDB default (conservative due to transaction limits)
         };
         
         return defaultPoolSizes[provider] || 2; // Fallback to safe default of 2

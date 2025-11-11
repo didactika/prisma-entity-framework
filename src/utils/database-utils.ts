@@ -1,10 +1,26 @@
 import { PrismaClient } from '@prisma/client';
-import { getPrismaInstance } from './config';
+import { getPrismaInstance } from '../config';
 
 /**
  * Supported database providers
  */
 export type DatabaseProvider = 'mysql' | 'postgresql' | 'sqlite' | 'sqlserver' | 'mongodb';
+
+/**
+ * Database capabilities interface
+ */
+export interface DatabaseCapabilities {
+    supportsSkipDuplicates: boolean;
+    supportsReturning: boolean;
+    supportsJson: boolean;
+    supportsArrays: boolean;
+    maxPlaceholders: number;
+}
+
+/**
+ * Cache for database provider detection
+ */
+let cachedProvider: DatabaseProvider | null = null;
 
 /**
  * Database dialect configuration for SQL generation
@@ -104,9 +120,43 @@ export function getDatabaseProvider(prisma?: PrismaClient): DatabaseProvider {
         }
     }
 
-    // Default to sqlite (most common in tests)
+    // Default to sqlite (most common in tests) - using console.warn for configuration issues
     console.warn('Could not detect database provider, defaulting to sqlite');
     return 'sqlite';
+}
+
+/**
+ * Gets database provider with caching to avoid repeated detection
+ * 
+ * @param prisma - Optional PrismaClient instance (uses global if not provided)
+ * @returns The detected database provider (cached after first call)
+ * 
+ * @example
+ * ```typescript
+ * const provider = getDatabaseProviderCached();
+ * console.log(provider); // 'postgresql' or 'mysql'
+ * // Subsequent calls return cached value
+ * ```
+ */
+export function getDatabaseProviderCached(prisma?: PrismaClient): DatabaseProvider {
+    if (cachedProvider === null) {
+        cachedProvider = getDatabaseProvider(prisma);
+    }
+    return cachedProvider;
+}
+
+/**
+ * Clears the database provider cache
+ * Useful for testing or when database configuration changes
+ * 
+ * @example
+ * ```typescript
+ * clearDatabaseProviderCache();
+ * // Next call to getDatabaseProviderCached will re-detect provider
+ * ```
+ */
+export function clearDatabaseProviderCache(): void {
+    cachedProvider = null;
 }
 
 /**
@@ -122,7 +172,7 @@ export function getDatabaseProvider(prisma?: PrismaClient): DatabaseProvider {
  * ```
  */
 export function getDatabaseDialect(prisma?: PrismaClient): DatabaseDialect {
-    const provider = getDatabaseProvider(prisma);
+    const provider = prisma ? getDatabaseProvider(prisma) : getDatabaseProviderCached();
     return DIALECTS[provider];
 }
 
@@ -170,6 +220,111 @@ export function formatBoolean(value: boolean, prisma?: PrismaClient): string {
 }
 
 /**
+ * Checks if the database supports a specific feature
+ * 
+ * @param feature - The feature to check
+ * @param provider - Optional database provider (uses cached if not provided)
+ * @returns True if the feature is supported
+ * 
+ * @example
+ * ```typescript
+ * if (supportsFeature('skipDuplicates')) {
+ *   // Use skipDuplicates option
+ * }
+ * ```
+ */
+export function supportsFeature(
+    feature: 'skipDuplicates' | 'returning' | 'json' | 'arrays',
+    provider?: DatabaseProvider
+): boolean {
+    const dbProvider = provider || getDatabaseProviderCached();
+    const capabilities = getDatabaseCapabilities(dbProvider);
+    
+    switch (feature) {
+        case 'skipDuplicates':
+            return capabilities.supportsSkipDuplicates;
+        case 'returning':
+            return capabilities.supportsReturning;
+        case 'json':
+            return capabilities.supportsJson;
+        case 'arrays':
+            return capabilities.supportsArrays;
+        default:
+            return false;
+    }
+}
+
+/**
+ * Gets comprehensive database capabilities for a provider
+ * 
+ * @param provider - Optional database provider (uses cached if not provided)
+ * @returns Database capabilities object
+ * 
+ * @example
+ * ```typescript
+ * const capabilities = getDatabaseCapabilities();
+ * if (capabilities.supportsSkipDuplicates) {
+ *   // Use skipDuplicates
+ * }
+ * ```
+ */
+export function getDatabaseCapabilities(provider?: DatabaseProvider): DatabaseCapabilities {
+    const dbProvider = provider || getDatabaseProviderCached();
+    
+    switch (dbProvider) {
+        case 'postgresql':
+            return {
+                supportsSkipDuplicates: true,
+                supportsReturning: true,
+                supportsJson: true,
+                supportsArrays: true,
+                maxPlaceholders: 32767, // PostgreSQL limit
+            };
+        case 'mysql':
+            return {
+                supportsSkipDuplicates: false,
+                supportsReturning: false,
+                supportsJson: true,
+                supportsArrays: false,
+                maxPlaceholders: 65535, // MySQL limit
+            };
+        case 'sqlite':
+            return {
+                supportsSkipDuplicates: true,
+                supportsReturning: true,
+                supportsJson: true,
+                supportsArrays: false,
+                maxPlaceholders: 999, // SQLite limit (SQLITE_MAX_VARIABLE_NUMBER)
+            };
+        case 'sqlserver':
+            return {
+                supportsSkipDuplicates: false,
+                supportsReturning: true,
+                supportsJson: true,
+                supportsArrays: false,
+                maxPlaceholders: 2100, // SQL Server limit
+            };
+        case 'mongodb':
+            return {
+                supportsSkipDuplicates: false,
+                supportsReturning: false,
+                supportsJson: true,
+                supportsArrays: true,
+                maxPlaceholders: Infinity, // MongoDB has no placeholder limit
+            };
+        default:
+            // Default to conservative capabilities
+            return {
+                supportsSkipDuplicates: false,
+                supportsReturning: false,
+                supportsJson: false,
+                supportsArrays: false,
+                maxPlaceholders: 999,
+            };
+    }
+}
+
+/**
  * Checks if a string is a valid database provider
  */
 function isValidProvider(provider: string): boolean {
@@ -183,4 +338,5 @@ function isValidProvider(provider: string): boolean {
 export const __testing = {
     DIALECTS,
     isValidProvider,
+    getCachedProvider: () => cachedProvider,
 };

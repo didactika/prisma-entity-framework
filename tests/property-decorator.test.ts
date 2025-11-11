@@ -15,7 +15,7 @@ interface ITestEntity {
 class TestEntityWithDecorator extends BaseEntity<ITestEntity> implements ITestEntity {
     static override readonly model = null; // Mock model for testing
 
-    public readonly id?: number;
+    public declare readonly id?: number;
     
     @Property() declare name: string;
     @Property() declare email: string;

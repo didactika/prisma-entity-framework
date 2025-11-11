@@ -42,10 +42,10 @@ class User extends BaseEntity<IUser> {
       name: 'user',
       dbName: 'users',
       fields: [
-        { name: 'id', dbName: 'id', kind: 'scalar' },
-        { name: 'name', dbName: 'name', kind: 'scalar' },
-        { name: 'email', dbName: 'email', kind: 'scalar' },
-        { name: 'age', dbName: 'age', kind: 'scalar' },
+        { name: 'id', dbName: 'id', kind: 'scalar' as const, type: 'Int' },
+        { name: 'name', dbName: 'name', kind: 'scalar' as const, type: 'String' },
+        { name: 'email', dbName: 'email', kind: 'scalar' as const, type: 'String' },
+        { name: 'age', dbName: 'age', kind: 'scalar' as const, type: 'Int' },
       ]
     };
   }

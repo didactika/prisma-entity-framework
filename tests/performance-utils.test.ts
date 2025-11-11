@@ -12,7 +12,7 @@ import {
     withRetry,
     chunk,
     BATCH_SIZE_CONFIG,
-} from '../src/performance-utils';
+} from '../src/utils/performance-utils';
 
 describe('Performance Utils', () => {
     describe('getOptimalBatchSize', () => {

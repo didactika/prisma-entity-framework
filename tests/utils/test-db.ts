@@ -4,8 +4,14 @@
  * Supports SQLite, MySQL, and PostgreSQL
  */
 
-import { getDatabaseProvider } from '../../src/database-utils';
-import { detectDatabaseProvider, type DatabaseProvider } from './database-detector';
+import { getDatabaseProvider } from '../../src/utils/database-utils';
+import { 
+  detectDatabaseProvider, 
+  detectDatabaseCapabilities,
+  logDatabaseCapabilities,
+  type DatabaseProvider,
+  type DatabaseCapabilities 
+} from './database-detector';
 import { unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 
@@ -13,13 +19,46 @@ import { join } from 'path';
 let databaseInitialized = false;
 
 /**
- * Test database configuration
+ * Test database instance with full capability information
+ */
+export interface TestDbInstance {
+  /** Prisma client instance */
+  client: any;
+  
+  /** Database provider type */
+  provider: DatabaseProvider;
+  
+  /** Complete database capabilities */
+  capabilities: DatabaseCapabilities;
+  
+  /** Seed test data into database */
+  seed: () => Promise<SeedData>;
+  
+  /** Clear all test data from database */
+  clear: () => Promise<void>;
+  
+  /** Cleanup and disconnect from database */
+  cleanup: () => Promise<void>;
+}
+
+/**
+ * Test database configuration (legacy interface)
+ * @deprecated Use TestDbInstance for full capability support
  */
 export interface TestDbConfig {
   client: any;
   cleanup: () => Promise<void>;
   provider: DatabaseProvider;
   supportsSkipDuplicates: boolean;
+}
+
+/**
+ * Seed data structure returned by seed function
+ */
+export interface SeedData {
+  users: any[];
+  posts: any[];
+  comments: any[];
 }
 
 /**
@@ -115,8 +154,9 @@ async function initializeDatabaseSchema(provider: DatabaseProvider): Promise<voi
 
 /**
  * Creates a new test database with automatic provider detection
- * Supports SQLite (default), MySQL, and PostgreSQL
+ * Supports SQLite (default), MySQL, PostgreSQL, and MongoDB
  * 
+ * @param logCapabilities - Whether to log detected capabilities (default: false)
  * @returns Test database configuration with client and cleanup function
  * 
  * @example
@@ -130,9 +170,14 @@ async function initializeDatabaseSchema(provider: DatabaseProvider): Promise<voi
  * }
  * ```
  */
-export async function setupTestDatabase(): Promise<TestDbConfig> {
+export async function setupTestDatabase(logCapabilities = false): Promise<TestDbConfig> {
   // Use shared database detection logic
   const { provider, supportsSkipDuplicates } = detectDatabaseProvider();
+
+  // Log capabilities if requested
+  if (logCapabilities) {
+    logDatabaseCapabilities();
+  }
 
   // Initialize database schema once
   await initializeDatabaseSchema(provider);
@@ -193,7 +238,7 @@ export async function setupTestDatabase(): Promise<TestDbConfig> {
  * const { users, posts, comments } = await seedTestDatabase(client);
  * ```
  */
-export async function seedTestDatabase(client: any) {
+export async function seedTestDatabase(client: any): Promise<SeedData> {
   // Create users
   const user1 = await client.user.create({
     data: {
@@ -309,17 +354,24 @@ export async function clearTestDatabase(client: any): Promise<void> {
 
 /**
  * Creates a test database instance for a single test suite
- * Automatically handles setup and cleanup
+ * Automatically handles setup and cleanup with full capability detection
  * 
- * @returns Promise with test database functions
+ * @param logCapabilities - Whether to log detected capabilities (default: true for integration tests)
+ * @returns Promise with test database instance including full capabilities
  * 
  * @example
  * ```typescript
  * describe('My Tests', () => {
- *   let db: Awaited<ReturnType<typeof createTestDb>>;
+ *   let db: TestDbInstance;
  * 
  *   beforeAll(async () => {
  *     db = await createTestDb();
+ *     
+ *     // Skip tests based on capabilities
+ *     if (!db.capabilities.supportsJSON) {
+ *       console.log('Skipping JSON tests');
+ *       return;
+ *     }
  *   });
  * 
  *   afterAll(async () => {
@@ -333,13 +385,22 @@ export async function clearTestDatabase(client: any): Promise<void> {
  * });
  * ```
  */
-export async function createTestDb() {
-  const { client, cleanup: cleanupDb, provider, supportsSkipDuplicates } = await setupTestDatabase();
+export async function createTestDb(logCapabilities = true): Promise<TestDbInstance> {
+  // Detect full capabilities
+  const capabilities = detectDatabaseCapabilities();
+  
+  // Log capabilities if requested
+  if (logCapabilities) {
+    logDatabaseCapabilities();
+  }
+  
+  // Setup database using legacy function
+  const { client, cleanup: cleanupDb, provider } = await setupTestDatabase(false);
 
   return {
     client,
     provider,
-    supportsSkipDuplicates,
+    capabilities,
     seed: () => seedTestDatabase(client),
     clear: () => clearTestDatabase(client),
     cleanup: cleanupDb,

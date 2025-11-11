@@ -26,7 +26,7 @@ class BenchUser extends BaseEntity<IBenchUser> {
     @Property() declare email: string;
     @Property() declare age?: number;
 
-    constructor(data?: IBenchUser) {
+    constructor(data?: Partial<IBenchUser>) {
         super(data);
     }
 }

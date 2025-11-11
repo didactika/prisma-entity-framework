@@ -1,4 +1,5 @@
 import {FindByFilterOptions} from "../types/search.types";
+import { isValidValue } from "../utils/validation-utils";
 
 /**
  * ConditionUtils class for validating and building search conditions
@@ -28,23 +29,8 @@ export default class ConditionUtils {
      * ```
      */
     public static isValid(value: any): boolean {
-        if (value === undefined || value === null) return false;
-        if (typeof value === "string") return value.trim() !== "";
-        if (typeof value === "boolean") return true;
-        if (typeof value === "number") return true;
-        if (value instanceof Date) return true;
-        if (Array.isArray(value)) return value.length > 0;
-
-        if (typeof value === "object") {
-            const entries = Object.entries(value);
-            if (entries.length === 0) return false;
-            for (const [, val] of entries) {
-                if (!this.isValid(val)) return false;
-            }
-            return true;
-        }
-
-        return true;
+        // Use validation-utils.isValidValue
+        return isValidValue(value);
     }
 
     /**

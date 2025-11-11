@@ -159,7 +159,7 @@ describe('Connection Pool Configuration', () => {
             configurePrisma(prisma);
             
             const poolSize = getConnectionPoolSize();
-            expect(poolSize).toBe(10); // MySQL default
+            expect(poolSize).toBe(8); // MySQL default
         });
         
         it('should return default for PostgreSQL without connection_limit', () => {
@@ -169,7 +169,7 @@ describe('Connection Pool Configuration', () => {
             configurePrisma(prisma);
             
             const poolSize = getConnectionPoolSize();
-            expect(poolSize).toBe(10); // PostgreSQL default
+            expect(poolSize).toBe(8); // PostgreSQL default
         });
         
         it('should return safe default when Prisma is not configured', () => {

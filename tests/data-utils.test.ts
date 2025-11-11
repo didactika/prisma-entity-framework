@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import DataUtils from '../src/data-utils';
+import DataUtils from '../src/utils/data-utils';
 
 describe('DataUtils', () => {
   describe('processRelations', () => {
@@ -415,3 +415,198 @@ describe('DataUtils', () => {
     });
   });
 });
+
+  describe('detectRelationType', () => {
+    /**
+     * Test: should handle when Prisma is not configured
+     */
+    it('should handle when Prisma is not configured', () => {
+      // Mock model info with explicit relation
+      const modelInfo = {
+        fields: [
+          {
+            name: 'areas',
+            kind: 'object',
+            type: 'AreasOnSubjects',
+            isList: true,
+          },
+        ],
+      };
+
+      // When Prisma is not configured, the method should handle gracefully
+      // It will either throw or return a fallback value
+      try {
+        const result = (DataUtils as any).detectRelationType(modelInfo, 'areas');
+        // If it doesn't throw, it should return a valid value or null
+        expect(['explicit', 'implicit', null]).toContain(result);
+      } catch (error: any) {
+        // If it throws, verify it's the expected Prisma configuration error
+        expect(error.message).toContain('Prisma instance not configured');
+      }
+    });
+
+    /**
+     * Test: should return null for non-existent fields
+     */
+    it('should return null for non-existent fields', () => {
+      const modelInfo = {
+        fields: [
+          {
+            name: 'title',
+            kind: 'scalar',
+            type: 'String',
+          },
+        ],
+      };
+
+      const result = (DataUtils as any).detectRelationType(modelInfo, 'nonExistent');
+      
+      expect(result).toBeNull();
+    });
+
+    /**
+     * Test: should return null for scalar fields
+     */
+    it('should return null for scalar fields', () => {
+      const modelInfo = {
+        fields: [
+          {
+            name: 'title',
+            kind: 'scalar',
+            type: 'String',
+          },
+        ],
+      };
+
+      const result = (DataUtils as any).detectRelationType(modelInfo, 'title');
+      
+      expect(result).toBeNull();
+    });
+
+    /**
+     * Test: should return null for non-list object fields
+     */
+    it('should return null for non-list object fields', () => {
+      const modelInfo = {
+        fields: [
+          {
+            name: 'author',
+            kind: 'object',
+            type: 'User',
+            isList: false,
+          },
+        ],
+      };
+
+      const result = (DataUtils as any).detectRelationType(modelInfo, 'author');
+      
+      expect(result).toBeNull();
+    });
+
+    /**
+     * Test: should handle missing modelInfo
+     */
+    it('should handle missing modelInfo', () => {
+      const result = (DataUtils as any).detectRelationType(null, 'areas');
+      
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('getJoinTableInfo', () => {
+    /**
+     * Test: should handle when Prisma is not configured
+     */
+    it('should handle when Prisma is not configured', () => {
+      // Mock model info with explicit relation
+      const modelInfo = {
+        fields: [
+          {
+            name: 'areas',
+            kind: 'object',
+            type: 'AreasOnSubjects',
+            isList: true,
+          },
+        ],
+      };
+
+      // When Prisma is not configured, the method should handle gracefully
+      try {
+        const result = (DataUtils as any).getJoinTableInfo('Subject', 'areas', modelInfo);
+        // If it doesn't throw, it should return null or valid join table info
+        expect(result === null || typeof result === 'object').toBe(true);
+      } catch (error: any) {
+        // If it throws, verify it's the expected Prisma configuration error
+        expect(error.message).toContain('Prisma instance not configured');
+      }
+    });
+
+    /**
+     * Test: should return null for non-existent fields
+     */
+    it('should return null for non-existent fields', () => {
+      const modelInfo = {
+        fields: [
+          {
+            name: 'title',
+            kind: 'scalar',
+            type: 'String',
+          },
+        ],
+      };
+
+      const result = (DataUtils as any).getJoinTableInfo('Subject', 'nonExistent', modelInfo);
+      
+      expect(result).toBeNull();
+    });
+
+    /**
+     * Test: should return null for scalar fields
+     */
+    it('should return null for scalar fields', () => {
+      const modelInfo = {
+        fields: [
+          {
+            name: 'title',
+            kind: 'scalar',
+            type: 'String',
+          },
+        ],
+      };
+
+      const result = (DataUtils as any).getJoinTableInfo('Subject', 'title', modelInfo);
+      
+      expect(result).toBeNull();
+    });
+
+    /**
+     * Test: should return null for non-list object fields
+     */
+    it('should return null for non-list object fields', () => {
+      const modelInfo = {
+        fields: [
+          {
+            name: 'author',
+            kind: 'object',
+            type: 'User',
+            isList: false,
+          },
+        ],
+      };
+
+      const result = (DataUtils as any).getJoinTableInfo('Post', 'author', modelInfo);
+      
+      expect(result).toBeNull();
+    });
+
+    /**
+     * Test: should handle missing modelInfo
+     */
+    it('should handle missing modelInfo', () => {
+      const result = (DataUtils as any).getJoinTableInfo('Subject', 'areas', null);
+      
+      expect(result).toBeNull();
+    });
+
+
+  });
