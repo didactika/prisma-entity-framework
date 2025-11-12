@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
-import SearchUtils from '../src/search/search-utils';
+import SearchUtils from '../src/utils/search-utils';
 import { mockRuntimeDataModel } from './__mocks__/prisma-client.mock';
 import { configurePrisma, resetPrismaConfiguration } from '../src/config';
 

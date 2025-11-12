@@ -4,7 +4,6 @@
 
 import {
   detectDatabaseCapabilities,
-  detectDatabaseProvider,
   supportsJSON,
   supportsScalarArrays,
   supportsSkipDuplicates,
@@ -197,24 +196,4 @@ describe('Database Capability Detection', () => {
     });
   });
 
-  describe('detectDatabaseProvider (legacy)', () => {
-    it('should return legacy config format', () => {
-      process.env.DATABASE_URL = 'mysql://localhost/test';
-      const config = detectDatabaseProvider();
-
-      expect(config.provider).toBe('mysql');
-      expect(config.schemaFile).toBe('schema.mysql.prisma');
-      expect(config.supportsSkipDuplicates).toBe(true);
-    });
-
-    it('should be compatible with new capabilities', () => {
-      process.env.DATABASE_URL = 'postgresql://localhost/test';
-      const legacyConfig = detectDatabaseProvider();
-      const capabilities = detectDatabaseCapabilities();
-
-      expect(legacyConfig.provider).toBe(capabilities.provider);
-      expect(legacyConfig.schemaFile).toBe(capabilities.schemaFile);
-      expect(legacyConfig.supportsSkipDuplicates).toBe(capabilities.supportsSkipDuplicates);
-    });
-  });
 });

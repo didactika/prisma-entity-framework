@@ -6,7 +6,6 @@
 
 import { getDatabaseProvider } from '../../src/utils/database-utils';
 import { 
-  detectDatabaseProvider, 
   detectDatabaseCapabilities,
   logDatabaseCapabilities,
   type DatabaseProvider,
@@ -39,17 +38,6 @@ export interface TestDbInstance {
   
   /** Cleanup and disconnect from database */
   cleanup: () => Promise<void>;
-}
-
-/**
- * Test database configuration (legacy interface)
- * @deprecated Use TestDbInstance for full capability support
- */
-export interface TestDbConfig {
-  client: any;
-  cleanup: () => Promise<void>;
-  provider: DatabaseProvider;
-  supportsSkipDuplicates: boolean;
 }
 
 /**
@@ -170,9 +158,10 @@ async function initializeDatabaseSchema(provider: DatabaseProvider): Promise<voi
  * }
  * ```
  */
-export async function setupTestDatabase(logCapabilities = false): Promise<TestDbConfig> {
+export async function setupTestDatabase(logCapabilities = false): Promise<TestDbInstance> {
   // Use shared database detection logic
-  const { provider, supportsSkipDuplicates } = detectDatabaseProvider();
+  const capabilities = detectDatabaseCapabilities();
+  const { provider } = capabilities;
 
   // Log capabilities if requested
   if (logCapabilities) {
@@ -220,7 +209,7 @@ export async function setupTestDatabase(logCapabilities = false): Promise<TestDb
       }
     };
 
-    return { client, cleanup, provider, supportsSkipDuplicates };
+    return { client, cleanup, provider, capabilities, seed: () => seedTestDatabase(client), clear: () => clearTestDatabase(client) };
   } catch (error) {
     console.error('❌ Failed to initialize test database:', error);
     throw error;
@@ -386,23 +375,10 @@ export async function clearTestDatabase(client: any): Promise<void> {
  * ```
  */
 export async function createTestDb(logCapabilities = true): Promise<TestDbInstance> {
-  // Detect full capabilities
-  const capabilities = detectDatabaseCapabilities();
-  
   // Log capabilities if requested
   if (logCapabilities) {
     logDatabaseCapabilities();
   }
   
-  // Setup database using legacy function
-  const { client, cleanup: cleanupDb, provider } = await setupTestDatabase(false);
-
-  return {
-    client,
-    provider,
-    capabilities,
-    seed: () => seedTestDatabase(client),
-    clear: () => clearTestDatabase(client),
-    cleanup: cleanupDb,
-  };
+  return setupTestDatabase(logCapabilities);
 }

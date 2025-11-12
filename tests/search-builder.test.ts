@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import SearchBuilder from '../src/search/search-builder';
+import SearchBuilder from '../src/utils/search-builder';
 import { FindByFilterOptions } from '../src/types/search.types';
 
 describe('SearchBuilder', () => {

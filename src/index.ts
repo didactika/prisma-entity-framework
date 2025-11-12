@@ -281,10 +281,10 @@ export { Property } from './decorators/property.decorator';
  * - ConditionUtils: Build Prisma where conditions from search criteria
  * - ObjectUtils: Object manipulation utilities for search operations
  */
-export { default as SearchUtils } from './search/search-utils';
-export { default as SearchBuilder } from './search/search-builder';
-export { default as ConditionUtils } from './search/condition-utils';
-export { default as ObjectUtils } from './search/object-utils';
+export { default as SearchUtils } from './utils/search-utils';
+export { default as SearchBuilder } from './utils/search-builder';
+export { default as ConditionUtils } from './utils/condition-utils';
+export { default as ObjectUtils } from './utils/object-utils';
 
 /**
  * Types

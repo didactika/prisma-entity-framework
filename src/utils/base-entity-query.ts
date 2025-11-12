@@ -1,6 +1,6 @@
 import { FindByFilterOptions } from "../types/search.types";
 import ModelUtils from "./model-utils";
-import SearchUtils from "../search/search-utils";
+import SearchUtils from "./search-utils";
 import { isNonEmptyArray } from "./validation-utils";
 import { logError } from "./error-utils";
 import { executeWithOrBatching, deduplicateResults } from "./query-utils";
