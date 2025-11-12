@@ -5,8 +5,8 @@ import ModelUtils from "./utils/model-utils";
 import { logError } from "./utils/error-utils";
 import { hasChanges as compareHasChanges } from "./utils/comparison-utils";
 import BaseEntityBatch from "./base-entity-batch";
-import BaseEntityQuery from "./base-entity-query";
-import BaseEntityHelpers from "./base-entity-helpers";
+import BaseEntityQuery from "./utils/base-entity-query";
+import BaseEntityHelpers from "./utils/base-entity-helpers";
 
 export default abstract class BaseEntity<TModel extends object = Record<string, unknown>> implements IBaseEntity<TModel> {
     static readonly model: unknown;

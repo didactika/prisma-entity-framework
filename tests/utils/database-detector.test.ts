@@ -14,7 +14,7 @@ import {
   getIdType,
   hasCapability,
   shouldSkipTest,
-} from './database-detector';
+} from '../helpers/database-detector';
 
 describe('Database Capability Detection', () => {
   const originalDatabaseUrl = process.env.DATABASE_URL;

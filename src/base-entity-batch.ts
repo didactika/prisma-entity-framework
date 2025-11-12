@@ -10,7 +10,7 @@ import { getOptimalBatchSize, processBatches } from "./utils/batch-utils";
 import { logError, handleUniqueConstraintError, withErrorHandling } from "./utils/error-utils";
 import { executeWithOrBatching } from "./utils/query-utils";
 import { hasChanges as compareHasChanges } from "./utils/comparison-utils";
-import BaseEntityHelpers from "./base-entity-helpers";
+import BaseEntityHelpers from "./utils/base-entity-helpers";
 
 /**
  * BaseEntityBatch - Helper class for batch operations.

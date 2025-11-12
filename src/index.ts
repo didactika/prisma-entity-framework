@@ -123,8 +123,8 @@ export {
  */
 export { default as BaseEntity } from './base-entity';
 export { default as BaseEntityBatch } from './base-entity-batch';
-export { default as BaseEntityQuery } from './base-entity-query';
-export { default as BaseEntityHelpers } from './base-entity-helpers';
+export { default as BaseEntityQuery } from './utils/base-entity-query';
+export { default as BaseEntityHelpers } from './utils/base-entity-helpers';
 export { default as ModelUtils, type JoinTableInfo } from './utils/model-utils';
 export { default as DataUtils } from './utils/data-utils';
 

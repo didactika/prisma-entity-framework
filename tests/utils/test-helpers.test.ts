@@ -18,7 +18,7 @@ import {
   retryWithBackoff,
   assertPerformance,
   getDatabaseConfig,
-} from './test-helpers';
+} from '../helpers/test-helpers';
 
 describe('Test Helper Utilities', () => {
   const originalDatabaseUrl = process.env.DATABASE_URL;

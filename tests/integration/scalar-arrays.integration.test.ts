@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import BaseEntity from '../../src/base-entity';
-import { createTestDb, type TestDbInstance } from '../utils/test-db';
+import { createTestDb, type TestDbInstance } from '../helpers/test-db';
 import { configurePrisma } from '../../src/config';
 
 let db: TestDbInstance;
