@@ -80,6 +80,29 @@ export function createBatches<T>(items: T[], batchSize: number): T[][] {
 }
 
 /**
+ * Split an array into optimal batches based on database provider
+ *
+ * @param items - Array of items to batch
+ * @param operation - The type of operation
+ * @returns Array of batches
+ *
+ * @example
+ * ```typescript
+ * const batches = createOptimalBatches(users, 'createMany');
+ * for (const batch of batches) {
+ *   await User.createMany(batch);
+ * }
+ * ```
+ */
+export function createOptimalBatches<T>(
+    items: T[],
+    operation: 'createMany' | 'updateMany' | 'transaction'
+): T[][] {
+    const batchSize = getOptimalBatchSize(operation);
+    return createBatches(items, batchSize);
+}
+
+/**
  * Gets optimal batch size for an operation and database
  * 
  * @param operation - The type of operation

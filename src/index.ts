@@ -122,7 +122,7 @@ export {
  * - Support for both explicit and implicit many-to-many relations
  */
 export { default as BaseEntity } from './base-entity';
-export { default as BaseEntityBatch } from './base-entity-batch';
+export { default as BaseEntityBatch } from './utils/base-entity-batch';
 export { default as BaseEntityQuery } from './utils/base-entity-query';
 export { default as BaseEntityHelpers } from './utils/base-entity-helpers';
 export { default as ModelUtils, type JoinTableInfo } from './utils/model-utils';
@@ -167,10 +167,8 @@ export {
     getOptimalBatchSize,
     estimateBatchMemoryUsage,
     isBatchSafe,
-    createOptimalBatches,
     createBatchMetrics,
     withRetry,
-    chunk,
     getOptimalOrBatchSize,
     calculateOrPlaceholders,
     isOrQuerySafe,

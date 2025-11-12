@@ -7,10 +7,8 @@ import {
     getOptimalBatchSize,
     estimateBatchMemoryUsage,
     isBatchSafe,
-    createOptimalBatches,
     createBatchMetrics,
     withRetry,
-    chunk,
     BATCH_SIZE_CONFIG,
 } from '../src/utils/performance-utils';
 
@@ -69,34 +67,6 @@ describe('Performance Utils', () => {
         });
     });
 
-    describe('createOptimalBatches', () => {
-        it('should split array into optimal batches', () => {
-            const items = Array.from({ length: 1000 }, (_, i) => i);
-            const batches = createOptimalBatches(items, 'createMany');
-
-            expect(batches.length).toBeGreaterThan(0);
-            expect(batches.every(batch => batch.length > 0)).toBe(true);
-
-            // Verify all items are included
-            const totalItems = batches.reduce((sum, batch) => sum + batch.length, 0);
-            expect(totalItems).toBe(1000);
-        });
-
-        it('should handle small arrays', () => {
-            const items = [1, 2, 3];
-            const batches = createOptimalBatches(items, 'createMany');
-
-            expect(batches.length).toBe(1);
-            expect(batches[0]).toEqual([1, 2, 3]);
-        });
-
-        it('should handle empty arrays', () => {
-            const items: number[] = [];
-            const batches = createOptimalBatches(items, 'createMany');
-
-            expect(batches.length).toBe(0);
-        });
-    });
 
     describe('createBatchMetrics', () => {
         it('should create metrics with correct initial values', () => {
@@ -187,40 +157,6 @@ describe('Performance Utils', () => {
         });
     });
 
-    describe('chunk', () => {
-        it('should chunk array into specified size', () => {
-            const array = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-            const chunks = chunk(array, 3);
-
-            expect(chunks).toEqual([
-                [1, 2, 3],
-                [4, 5, 6],
-                [7, 8, 9],
-                [10]
-            ]);
-        });
-
-        it('should handle array smaller than chunk size', () => {
-            const array = [1, 2];
-            const chunks = chunk(array, 5);
-
-            expect(chunks).toEqual([[1, 2]]);
-        });
-
-        it('should handle empty array', () => {
-            const array: number[] = [];
-            const chunks = chunk(array, 5);
-
-            expect(chunks).toEqual([]);
-        });
-
-        it('should handle chunk size of 1', () => {
-            const array = [1, 2, 3];
-            const chunks = chunk(array, 1);
-
-            expect(chunks).toEqual([[1], [2], [3]]);
-        });
-    });
 
     describe('BATCH_SIZE_CONFIG', () => {
         it('should have configuration for all database providers', () => {

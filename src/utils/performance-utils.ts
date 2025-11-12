@@ -4,7 +4,6 @@
 
 import { getDatabaseProviderCached } from './database-utils';
 import { getPrismaInstance } from '../config';
-import { getOptimalBatchSize } from './batch-utils';
 
 // Re-export batch size configuration and optimal batch size from batch-utils for backward compatibility
 export { getOptimalBatchSize, BATCH_SIZE_CONFIG } from './batch-utils';
@@ -35,34 +34,6 @@ export function isBatchSafe(itemCount: number, maxMemoryMB: number = 100, avgIte
     return estimatedMemory <= maxMemoryMB;
 }
 
-/**
- * Split an array into optimal batches based on database provider
- * 
- * @param items - Array of items to batch
- * @param operation - The type of operation
- * @returns Array of batches
- * 
- * @example
- * ```typescript
- * const batches = createOptimalBatches(users, 'createMany');
- * for (const batch of batches) {
- *   await User.createMany(batch);
- * }
- * ```
- */
-export function createOptimalBatches<T>(
-    items: T[],
-    operation: 'createMany' | 'updateMany' | 'transaction'
-): T[][] {
-    const batchSize = getOptimalBatchSize(operation);
-    const batches: T[][] = [];
-    
-    for (let i = 0; i < items.length; i += batchSize) {
-        batches.push(items.slice(i, i + batchSize));
-    }
-    
-    return batches;
-}
 
 /**
  * Performance metrics for batch operations
@@ -192,21 +163,6 @@ export async function withRetry<T>(
     throw lastError;
 }
 
-/**
- * Chunk an array into smaller arrays
- * More efficient than slice for large arrays
- * 
- * @param array - Array to chunk
- * @param size - Size of each chunk
- * @returns Array of chunks
- */
-export function chunk<T>(array: T[], size: number): T[][] {
-    const chunks: T[][] = [];
-    for (let i = 0; i < array.length; i += size) {
-        chunks.push(array.slice(i, i + size));
-    }
-    return chunks;
-}
 
 /**
  * Database-specific placeholder/parameter limits
