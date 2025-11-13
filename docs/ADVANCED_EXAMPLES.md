@@ -61,31 +61,3 @@ const products = await Product.findByFilter({
     ]
 });
 ```
-
-### Batch Operations with Performance Monitoring
-
-```typescript
-import { processBatches, getOptimalBatchSize } from 'prisma-entity-framework';
-
-// Assume User entity is defined as in the README
-const largeDataset = Array.from({ length: 10000 }, (_, i) => ({
-    name: `User ${i}`,
-    email: `user${i}@example.com`,
-}));
-
-const batchSize = getOptimalBatchSize('createMany');
-const startTime = Date.now();
-
-const result = await processBatches(
-    largeDataset,
-    batchSize,
-    async (batch) => {
-        return User.createMany(batch);
-    },
-    { parallel: true, concurrency: 4 }
-);
-
-const totalTime = Date.now() - startTime;
-console.log(`Processed ${largeDataset.length} items in ${totalTime}ms`);
-console.log(`Successful batches: ${result.successfulBatches}, Failed batches: ${result.failedBatches}`);
-```
