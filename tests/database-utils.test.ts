@@ -8,7 +8,7 @@ import {
     supportsFeature,
     getDatabaseCapabilities,
     __testing
-} from '../src/utils/database-utils';
+} from '../src/core/utils/database-utils';
 import { PrismaClient } from '@prisma/client';
 
 describe('Database Utils', () => {

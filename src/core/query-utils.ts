@@ -5,10 +5,10 @@
  * including batching to avoid database placeholder limits and result deduplication.
  */
 
-import { getOptimalOrBatchSize, isOrQuerySafe } from './performance-utils';
-import { executeInParallel } from './parallel-utils';
-import { isParallelEnabled } from '../config';
-import { logError } from './error-utils';
+import { getOptimalOrBatchSize, isOrQuerySafe } from './utils/performance-utils';
+import { executeInParallel } from './utils/parallel-utils';
+import { isParallelEnabled } from './config';
+import { logError } from './utils/error-utils';
 
 /**
  * Options for OR query batching

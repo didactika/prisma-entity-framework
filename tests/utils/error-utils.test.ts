@@ -9,7 +9,7 @@ import {
     isUniqueConstraintError,
     handleUniqueConstraintError,
     withErrorHandling
-} from '../../src/utils/error-utils';
+} from '../../src/core/utils/error-utils';
 
 describe('Error Utils', () => {
     // Mock console.error and console.log

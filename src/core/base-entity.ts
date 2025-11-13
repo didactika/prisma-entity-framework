@@ -1,12 +1,12 @@
-import { IBaseEntity } from "./interfaces/base-entity.interface";
-import { FindByFilterOptions } from "./types/search.types";
-import DataUtils from "./utils/data-utils";
-import ModelUtils from "./utils/model-utils";
+import { IBaseEntity } from "./structures/interfaces/base-entity.interface";
+import { FindByFilterOptions } from "./structures/types/search.types";
+import DataUtils from "./data-utils";
+import ModelUtils from "./model-utils";
 import { logError } from "./utils/error-utils";
 import { hasChanges as compareHasChanges } from "./utils/comparison-utils";
-import BaseEntityBatch from "./utils/base-entity-batch";
-import BaseEntityQuery from "./utils/base-entity-query";
-import BaseEntityHelpers from "./utils/base-entity-helpers";
+import BaseEntityBatch from "./base-entity-batch";
+import BaseEntityQuery from "./base-entity-query";
+import BaseEntityHelpers from "./base-entity-helpers";
 
 export default abstract class BaseEntity<TModel extends object = Record<string, unknown>> implements IBaseEntity<TModel> {
     static readonly model: unknown;

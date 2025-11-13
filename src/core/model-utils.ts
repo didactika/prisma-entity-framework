@@ -1,6 +1,6 @@
-import { getPrismaInstance } from '../config';
-import { FindByFilterOptions } from "../types/search.types";
-import { logError } from './error-utils';
+import { getPrismaInstance } from './config';
+import { FindByFilterOptions } from "./structures/types/search.types";
+import { logError } from './utils/error-utils';
 
 /**
  * Join table information for explicit many-to-many relationships

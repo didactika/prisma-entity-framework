@@ -1,5 +1,5 @@
-import {FindByFilterOptions} from "../types/search.types";
-import { isValidValue } from "./validation-utils";
+import { FindByFilterOptions } from "./structures/types/search.types";
+import { isValidValue } from "./utils/validation-utils";
 
 /**
  * ConditionUtils class for validating and building search conditions

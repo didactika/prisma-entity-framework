@@ -7,15 +7,15 @@ import {
     createOrBatches,
     deduplicateResults,
     executeWithOrBatching
-} from '../../src/utils/query-utils';
-import * as performanceUtils from '../../src/utils/performance-utils';
-import * as parallelUtils from '../../src/utils/parallel-utils';
-import * as config from '../../src/config';
+} from '../../src/core/query-utils';
+import * as performanceUtils from '../../src/core/utils/performance-utils';
+import * as parallelUtils from '../../src/core/utils/parallel-utils';
+import * as config from '../../src/core/config';
 
 // Mock dependencies
-jest.mock('../../src/utils/performance-utils');
-jest.mock('../../src/utils/parallel-utils');
-jest.mock('../../src/config');
+jest.mock('../../src/core/utils/performance-utils');
+jest.mock('../../src/core/utils/parallel-utils');
+jest.mock('../../src/core/config');
 
 const mockPerformanceUtils = performanceUtils as jest.Mocked<typeof performanceUtils>;
 const mockParallelUtils = parallelUtils as jest.Mocked<typeof parallelUtils>;

@@ -11,7 +11,7 @@ import {
     deepEqualObjects,
     hasChanges,
     isStandardIgnoredField
-} from '../../src/utils/comparison-utils';
+} from '../../src/core/utils/comparison-utils';
 
 describe('Comparison Utils', () => {
     describe('normalizeValue', () => {

@@ -1,11 +1,11 @@
-import { FindByFilterOptions } from "../types/search.types";
+import { FindByFilterOptions } from "./structures/types/search.types";
 import ModelUtils from "./model-utils";
 import SearchUtils from "./search-utils";
-import { isNonEmptyArray } from "./validation-utils";
-import { logError } from "./error-utils";
+import { isNonEmptyArray } from "./utils/validation-utils";
+import { logError } from "./utils/error-utils";
 import { executeWithOrBatching, deduplicateResults } from "./query-utils";
-import { executeInParallel } from "./parallel-utils";
-import { isParallelEnabled } from "../config";
+import { executeInParallel } from "./utils/parallel-utils";
+import { isParallelEnabled } from "./config";
 
 /**
  * BaseEntityQuery - Helper class for query operations.

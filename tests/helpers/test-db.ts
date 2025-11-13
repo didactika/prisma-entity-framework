@@ -4,7 +4,7 @@
  * Supports SQLite, MySQL, and PostgreSQL
  */
 
-import { getDatabaseProvider } from '../../src/utils/database-utils';
+import { getDatabaseProvider } from '../../src/core/utils/database-utils';
 import { 
   detectDatabaseCapabilities,
   logDatabaseCapabilities,

@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import BaseEntity from '../src/base-entity';
-import { configurePrisma, resetPrismaConfiguration } from '../src/config';
+import BaseEntity from '../src/core/base-entity';
+import { configurePrisma, resetPrismaConfiguration } from '../src/core/config';
 import { mockPrismaClient } from './__mocks__/prisma-client.mock';
 
 interface IBaseEntity {

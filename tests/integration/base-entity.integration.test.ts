@@ -20,9 +20,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
-import BaseEntity from '../../src/base-entity';
-import { Property } from '../../src/decorators/property.decorator';
-import { configurePrisma, resetPrismaConfiguration } from '../../src/config';
+import BaseEntity from '../../src/core/base-entity';
+import { Property } from '../../src/core/decorators/property.decorator';
+import { configurePrisma, resetPrismaConfiguration } from '../../src/core/config';
 import { createTestDb } from '../helpers/test-db';
 import type { PrismaClient } from '@prisma/client';
 

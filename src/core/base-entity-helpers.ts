@@ -1,9 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 import DataUtils from "./data-utils";
 import ModelUtils from "./model-utils";
-import { getPrismaInstance } from '../config';
-import { quoteIdentifier, formatBoolean, getDatabaseProviderCached } from "./database-utils";
-import { isObject, shouldSkipField as validationShouldSkipField } from "./validation-utils";
+import { getPrismaInstance } from './config';
+import { quoteIdentifier, formatBoolean, getDatabaseProviderCached } from "./utils/database-utils";
+import { isObject, shouldSkipField as validationShouldSkipField } from "./utils/validation-utils";
 
 /**
  * BaseEntityHelpers - Internal helper methods for BaseEntity operations.

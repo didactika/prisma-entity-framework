@@ -8,7 +8,7 @@ import {
     createBatches,
     getOptimalBatchSize,
     processBatches
-} from '../../src/utils/batch-utils';
+} from '../../src/core/utils/batch-utils';
 
 describe('Batch Utils', () => {
     describe('createBatches', () => {

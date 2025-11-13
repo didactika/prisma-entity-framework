@@ -1,9 +1,8 @@
-import { getPrismaInstance } from '../config';
-import { executeInParallel } from './parallel-utils';
-import { isParallelEnabled } from '../config';
-import { getDatabaseProviderCached } from './database-utils';
-import { isObject, isNonEmptyArray } from './validation-utils';
-import { logError } from './error-utils';
+import { getPrismaInstance, isParallelEnabled } from './config';
+import { executeInParallel } from './utils/parallel-utils';
+import { getDatabaseProviderCached } from './utils/database-utils';
+import { isObject, isNonEmptyArray } from './utils/validation-utils';
+import { logError } from './utils/error-utils';
 import type { PrismaClient } from '@prisma/client';
 
 import ModelUtils from './model-utils';

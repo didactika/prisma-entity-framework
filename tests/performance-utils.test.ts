@@ -10,7 +10,7 @@ import {
     createBatchMetrics,
     withRetry,
     BATCH_SIZE_CONFIG,
-} from '../src/utils/performance-utils';
+} from '../src/core/utils/performance-utils';
 
 describe('Performance Utils', () => {
     describe('getOptimalBatchSize', () => {

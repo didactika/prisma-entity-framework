@@ -4,9 +4,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
-import SearchUtils from '../src/utils/search-utils';
+import SearchUtils from '../src/core/search-utils';
 import { mockRuntimeDataModel } from './__mocks__/prisma-client.mock';
-import { configurePrisma, resetPrismaConfiguration } from '../src/config';
+import { configurePrisma, resetPrismaConfiguration } from '../src/core/config';
 
 describe('SearchUtils', () => {
   // Mock Prisma client for nested relation tests

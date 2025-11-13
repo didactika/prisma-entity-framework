@@ -226,7 +226,7 @@ export default class ObjectUtils {
         if (!field || field.kind !== 'object') return null;
 
         try {
-            const { getPrismaInstance } = require('../config');
+            const { getPrismaInstance } = require('./config');
             const prisma = getPrismaInstance();
             const runtimeDataModel = prisma._runtimeDataModel;
             const relatedModelName = field.type;

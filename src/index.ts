@@ -27,7 +27,7 @@ export {
     getMaxConcurrency,
     isParallelEnabled,
     type PrismaConfig
-} from './config';
+} from './core/config';
 
 /**
  * Rate Limiter
@@ -43,7 +43,7 @@ export {
     createRateLimiter,
     type RateLimiterOptions,
     type RateLimiterStatus
-} from './utils/rate-limiter';
+} from './core/rate-limiter';
 
 /**
  * Parallel Execution
@@ -65,7 +65,7 @@ export {
     type ParallelOptions,
     type ParallelResult,
     type ParallelMetrics
-} from './utils/parallel-utils';
+} from './core/utils/parallel-utils';
 
 /**
  * Core Entity Classes
@@ -121,12 +121,12 @@ export {
  * - normalizeRelationsToFK(): Convert relation objects to FK fields
  * - Support for both explicit and implicit many-to-many relations
  */
-export { default as BaseEntity } from './base-entity';
-export { default as BaseEntityBatch } from './utils/base-entity-batch';
-export { default as BaseEntityQuery } from './utils/base-entity-query';
-export { default as BaseEntityHelpers } from './utils/base-entity-helpers';
-export { default as ModelUtils, type JoinTableInfo } from './utils/model-utils';
-export { default as DataUtils } from './utils/data-utils';
+export { default as BaseEntity } from './core/base-entity';
+export { default as BaseEntityBatch } from './core/base-entity-batch';
+export { default as BaseEntityQuery } from './core/base-entity-query';
+export { default as BaseEntityHelpers } from './core/base-entity-helpers';
+export { default as ModelUtils, type JoinTableInfo } from './core/model-utils';
+export { default as DataUtils } from './core/data-utils';
 
 /**
  * Database Utilities
@@ -150,7 +150,7 @@ export {
     type DatabaseProvider,
     type DatabaseDialect,
     type DatabaseCapabilities
-} from './utils/database-utils';
+} from './core/utils/database-utils';
 
 /**
  * Performance Utilities
@@ -176,7 +176,7 @@ export {
     DEFAULT_RETRY_CONFIG,
     type BatchMetrics,
     type RetryConfig
-} from './utils/performance-utils';
+} from './core/utils/performance-utils';
 
 /**
  * Validation Utilities
@@ -195,7 +195,7 @@ export {
     hasPrismaOperations,
     isNonEmptyArray,
     shouldSkipField
-} from './utils/validation-utils';
+} from './core/utils/validation-utils';
 
 /**
  * Comparison Utilities
@@ -211,7 +211,7 @@ export {
     deepEqualArrays,
     deepEqualObjects,
     hasChanges
-} from './utils/comparison-utils';
+} from './core/utils/comparison-utils';
 
 /**
  * Batch Utilities
@@ -227,7 +227,7 @@ export {
     processBatches,
     type BatchProcessingOptions,
     type BatchProcessingResult
-} from './utils/batch-utils';
+} from './core/utils/batch-utils';
 
 /**
  * Error Utilities
@@ -243,7 +243,7 @@ export {
     isUniqueConstraintError,
     handleUniqueConstraintError,
     withErrorHandling
-} from './utils/error-utils';
+} from './core/utils/error-utils';
 
 /**
  * Query Utilities
@@ -260,7 +260,7 @@ export {
     deduplicateResults,
     executeWithOrBatching,
     type OrBatchingOptions
-} from './utils/query-utils';
+} from './core/query-utils';
 
 /**
  * Decorators
@@ -268,7 +268,7 @@ export {
  * Property decorators for entity classes:
  * - Property: Mark class properties for automatic initialization and tracking
  */
-export { Property } from './decorators/property.decorator';
+export { Property } from './core/decorators/property.decorator';
 
 /**
  * Search Utilities
@@ -279,21 +279,21 @@ export { Property } from './decorators/property.decorator';
  * - ConditionUtils: Build Prisma where conditions from search criteria
  * - ObjectUtils: Object manipulation utilities for search operations
  */
-export { default as SearchUtils } from './utils/search-utils';
-export { default as SearchBuilder } from './utils/search-builder';
-export { default as ConditionUtils } from './utils/condition-utils';
-export { default as ObjectUtils } from './utils/object-utils';
+export { default as SearchUtils } from './core/search-utils';
+export { default as SearchBuilder } from './core/search-builder';
+export { default as ConditionUtils } from './core/condition-utils';
+export { default as ObjectUtils } from './core/object-utils';
 
 /**
  * Types
  * 
  * TypeScript type definitions for search, pagination, and filtering
  */
-export * from './types/search.types';
+export * from './core/structures/types/search.types';
 
 /**
  * Interfaces
  * 
  * TypeScript interfaces for BaseEntity and related functionality
  */
-export * from './interfaces/base-entity.interface';
+export * from './core/structures/interfaces/base-entity.interface';
