@@ -5,9 +5,13 @@
 ```typescript
 const products = await Product.findByFilter({
     // Base filter
-    categoryId: { in: [1, 2, 3] },
     isActive: true
+    //search by relations
+    category: {
+        name: "Electronics"
+    }
 }, {
+    onlyOne: true, // Return only the first match, by default is false
     search: {
         // Text search across multiple fields
         stringSearch: [

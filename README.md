@@ -14,6 +14,22 @@ Prisma is a fantastic query builder, but it's not a traditional ORM. This framew
 
 ---
 
+### Prisma Entity Framework vs Prisma Client
+
+| Feature | Prisma Client | Prisma Entity Framework |
+|---------|--------------|-------------------------|
+| **Active Record** | ❌ No | ✅ `user.create()`, `user.update()` |
+| **Instance Methods** | ❌ No | ✅ Full lifecycle methods |
+| **Query DSL** | Basic where | ✅ LIKE, ranges, lists, OR/AND |
+| **Batch Optimization** | Basic | ✅ Database-specific, SQL-optimized |
+| **Upsert** | Manual | ✅ Automatic with change detection |
+| **Graph Traversal** | Manual | ✅ Automatic path finding |
+| **Performance Tools** | ❌ No | ✅ Metrics, retry, memory estimation |
+| **Pagination** | Manual | ✅ Built-in formatted responses |
+| **Type Safety** | ✅ Full | ✅ Full (maintains Prisma types) |
+
+---
+
 ## 📦 Installation
 
 ```bash
@@ -66,6 +82,7 @@ pnpm add prisma-entity-framework
     const results = await User.findByFilter({
         isActive: true
     }, {
+        onlyOne: true, //get only first match or all records, false by default
         search: {
             stringSearch: [{ keys: ['name', 'email'], value: 'john', mode: 'LIKE' }]
         },
@@ -86,7 +103,7 @@ pnpm add prisma-entity-framework
     ```
 -   🔍 **Advanced Query Builder**: Build complex, declarative queries with support for `LIKE`, ranges, and lists.
     ```typescript
-    const users = await User.findByFilter({}, {
+    const users = await User.findByFilter({name: "John"}, {
         search: {
             rangeSearch: [{ keys: ['age'], min: 18 }]
         }
@@ -119,9 +136,9 @@ pnpm add prisma-entity-framework
 
 Dive deeper into the framework's capabilities:
 
--   **[Complete API Reference](./docs/API_REFERENCE.md)**: A detailed breakdown of all classes, methods, and types.
--   **[Advanced Examples](./docs/ADVANCED_EXAMPLES.md)**: See complex queries and performance monitoring in action.
--   **[Core Features Guide](./docs/FEATURES.md)**: Learn about parallel batching and see how we stack up against Prisma Client.
+-   **[Complete API Reference](./docs/api-reference.md)**: A detailed breakdown of all classes, methods, and types.
+-   **[Advanced Examples](./docs/advanced-examples.md)**: See complex queries in action.
+-   **[Advanced configuration guide](./docs/config.md)**: Learn about advanced configuration.
 -   **[Property Behavior Guide](./docs/property-behavior-guide.md)**: Understand how the `@Property` decorator works.
 -   **[Testing Guide](./docs/testing-guide.md)**: Best practices for testing your entities.
 
@@ -149,4 +166,4 @@ Contributions are welcome! Please feel free to submit a Pull Request. Check out 
 
 ## 📝 License
 
-MIT © 2025 [Hector Arrechea](https://github.com/hector-ae21) & [Eduardo Estrada](https://github.com/e2rd0)
+MIT © 2025 [Eduardo Estrada](https://github.com/e2rd0) & [Hector Arrechea](https://github.com/hector-ae21)
