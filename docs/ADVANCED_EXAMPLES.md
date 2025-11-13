@@ -1,3 +1,4 @@
+<!-- Assume Product and User entities are defined as shown in the main README.md -->
 
 ### Complex Search Query
 
@@ -42,7 +43,9 @@ const products = await Product.findByFilter({
     // Pagination
     pagination: {
         page: 1,
-        pageSize: 20
+        pageSize: 20,
+        take: 20,
+        skip: 0
     },
 
     // Sort by relevance
@@ -62,33 +65,27 @@ const products = await Product.findByFilter({
 ### Batch Operations with Performance Monitoring
 
 ```typescript
-import {
-    createOptimalBatches,
-    createBatchMetrics,
-    withRetry
-} from 'prisma-entity-framework';
+import { processBatches, getOptimalBatchSize } from 'prisma-entity-framework';
 
-const metrics = createBatchMetrics();
-const batches = createOptimalBatches(largeDataset, 'createMany');
+// Assume User entity is defined as in the README
+const largeDataset = Array.from({ length: 10000 }, (_, i) => ({
+    name: `User ${i}`,
+    email: `user${i}@example.com`,
+}));
 
-for (const batch of batches) {
-    const startTime = Date.now();
+const batchSize = getOptimalBatchSize('createMany');
+const startTime = Date.now();
 
-    await withRetry(
-        () => User.createMany(batch),
-        { maxRetries: 3, initialDelayMs: 100 }
-    );
+const result = await processBatches(
+    largeDataset,
+    batchSize,
+    async (batch) => {
+        return User.createMany(batch);
+    },
+    { parallel: true, concurrency: 4 }
+);
 
-    metrics.recordBatch(batch.length, Date.now() - startTime);
-}
-
-console.log('Performance:', metrics.getStats());
-// {
-//   totalBatches: 10,
-//   totalItems: 10000,
-//   totalTime: 45000,
-//   avgBatchSize: 1000,
-//   avgBatchTime: 4500,
-//   itemsPerSecond: 222
-// }
+const totalTime = Date.now() - startTime;
+console.log(`Processed ${largeDataset.length} items in ${totalTime}ms`);
+console.log(`Successful batches: ${result.successfulBatches}, Failed batches: ${result.failedBatches}`);
 ```

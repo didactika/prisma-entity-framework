@@ -45,7 +45,7 @@ const users = await User.findByFilter(
         search: {
             stringSearch: [{ keys: ['name'], value: 'john', mode: 'LIKE' }]
         },
-        pagination: { page: 1, pageSize: 10 },
+        pagination: { page: 1, pageSize: 10, take: 10, skip: 0 },
         orderBy: { createdAt: 'desc' }
     }
 );
@@ -92,7 +92,10 @@ const user = await User.upsert({
 Batch upsert with statistics.
 
 ```typescript
-const result = await User.upsertMany([...]);
+const result = await User.upsertMany([
+    { email: 'user1@example.com', name: 'User 1' },
+    { email: 'user2@example.com', name: 'User 2' },
+]);
 // { created: 2, updated: 1, unchanged: 0, total: 3 }
 ```
 
@@ -191,10 +194,13 @@ Convert relation objects to foreign key fields.
 Build complex search queries declaratively.
 
 ```typescript
-import { SearchBuilder, SearchUtils } from 'prisma-entity-framework';
+import { SearchBuilder, SearchUtils, FindByFilterOptions, ModelUtils } from 'prisma-entity-framework';
 
-const builder = new SearchBuilder(modelInfo);
-const filters = builder.build(searchOptions);
+const modelInfo = ModelUtils.getModelInformationCached('User');
+const searchOptions: FindByFilterOptions.SearchOptions = {
+    stringSearch: [{ keys: ['name'], value: 'john', mode: 'LIKE' }]
+};
+const filters = SearchBuilder.build({}, searchOptions, modelInfo);
 ```
 
 ---

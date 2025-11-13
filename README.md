@@ -69,7 +69,7 @@ pnpm add prisma-entity-framework
         search: {
             stringSearch: [{ keys: ['name', 'email'], value: 'john', mode: 'LIKE' }]
         },
-        pagination: { page: 1, pageSize: 10 }
+        pagination: { page: 1, pageSize: 10, take: 10, skip: 0 }
     });
 
     console.log(results.data); // Paginated array of User instances
@@ -86,7 +86,11 @@ pnpm add prisma-entity-framework
     ```
 -   🔍 **Advanced Query Builder**: Build complex, declarative queries with support for `LIKE`, ranges, and lists.
     ```typescript
-    const users = await User.findByFilter({ age: { gt: 18 } });
+    const users = await User.findByFilter({}, {
+        search: {
+            rangeSearch: [{ keys: ['age'], min: 18 }]
+        }
+    });
     ```
 -   ⚡ **Optimized Batch Operations**: High-performance, database-aware batching for `createMany`, `updateMany`, and `upsertMany`.
     ```typescript
@@ -95,10 +99,13 @@ pnpm add prisma-entity-framework
 -   🚀 **Parallel Execution**: Run batch operations concurrently for a 2-6x speed boost with zero configuration required.
     ```typescript
     // This feature is automatic, no code change needed!
+    const manyUsers = [{ email: 'user1@example.com' }, { email: 'user2@example.com' }];
     await User.upsertMany(manyUsers); // Runs in parallel
     ```
 -   🕸️ **Graph Traversal**: Analyze and navigate your data model with utilities for dependency sorting and pathfinding.
     ```typescript
+    import { ModelUtils } from 'prisma-entity-framework';
+
     const path = ModelUtils.findPathToParentModel('Comment', 'User'); // -> "post.author"
     ```
 -   📄 **Automatic Pagination**: Get formatted, paginated responses from your queries out of the box.
