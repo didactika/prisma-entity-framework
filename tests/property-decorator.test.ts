@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
-import BaseEntity from '../src/base-entity';
-import { Property } from '../src/decorators/property.decorator';
+import BaseEntity from '../src/core/base-entity';
+import { Property } from '../src/core/decorators/property.decorator';
 
 // Mock interface for testing
 interface ITestEntity {

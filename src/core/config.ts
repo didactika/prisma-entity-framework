@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { RateLimiter, createRateLimiter } from './utils/rate-limiter';
+import { RateLimiter, createRateLimiter } from './rate-limiter';
 import { getDatabaseProvider } from './utils/database-utils';
 
 /**

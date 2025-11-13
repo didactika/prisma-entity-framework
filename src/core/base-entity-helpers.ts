@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
-import DataUtils from "./utils/data-utils";
-import ModelUtils from "./utils/model-utils";
+import DataUtils from "./data-utils";
+import ModelUtils from "./model-utils";
 import { getPrismaInstance } from './config';
 import { quoteIdentifier, formatBoolean, getDatabaseProviderCached } from "./utils/database-utils";
 import { isObject, shouldSkipField as validationShouldSkipField } from "./utils/validation-utils";

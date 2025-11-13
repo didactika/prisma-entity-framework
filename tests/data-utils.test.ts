@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import DataUtils from '../src/utils/data-utils';
+import DataUtils from '../src/core/data-utils';
 
 describe('DataUtils', () => {
   describe('processRelations', () => {

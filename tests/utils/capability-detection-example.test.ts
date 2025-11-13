@@ -3,14 +3,14 @@
  * This file serves as documentation and a working example
  */
 
-import { createTestDb, type TestDbInstance } from './test-db';
+import { createTestDb, type TestDbInstance } from '../helpers/test-db';
 import { 
   skipIfNotSupported, 
   testIf, 
   describeIf,
   getMaxConcurrency,
   PerformanceMetrics 
-} from './test-helpers';
+} from '../helpers/test-helpers';
 
 /**
  * Example 1: Using TestDbInstance with full capability detection

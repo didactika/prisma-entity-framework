@@ -7,21 +7,21 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
-import BaseEntity from '../../src/base-entity';
-import { Property } from '../../src/decorators/property.decorator';
-import { configurePrisma, resetPrismaConfiguration, getConnectionPoolSize, isParallelEnabled } from '../../src/config';
-import { createTestDb } from '../utils/test-db';
+import BaseEntity from '../../src/core/base-entity';
+import { Property } from '../../src/core/decorators/property.decorator';
+import { configurePrisma, resetPrismaConfiguration, getConnectionPoolSize, isParallelEnabled } from '../../src/core/config';
+import { createTestDb } from '../helpers/test-db';
 import { 
   detectDatabaseCapabilities, 
   logDatabaseCapabilities,
   type DatabaseCapabilities 
-} from '../utils/database-detector';
+} from '../helpers/database-detector';
 import { 
   getIdType, 
   isProvider,
   PerformanceMetrics,
   measureTime 
-} from '../utils/test-helpers';
+} from '../helpers/test-helpers';
 import type { PrismaClient } from '@prisma/client';
 
 interface ITestUser {

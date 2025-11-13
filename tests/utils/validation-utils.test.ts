@@ -11,7 +11,7 @@ import {
     hasPrismaOperations,
     isNonEmptyArray,
     shouldSkipField
-} from '../../src/utils/validation-utils';
+} from '../../src/core/utils/validation-utils';
 
 describe('Validation Utils', () => {
     describe('isObject', () => {

@@ -5,10 +5,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
-import BaseEntity from '../../src/base-entity';
-import { configurePrisma, resetPrismaConfiguration } from '../../src/config';
-import { createTestDb } from '../utils/test-db';
-import type { TestDbInstance } from '../utils/test-db';
+import BaseEntity from '../../src/core/base-entity';
+import { configurePrisma, resetPrismaConfiguration } from '../../src/core/config';
+import { createTestDb } from '../helpers/test-db';
+import type { TestDbInstance } from '../helpers/test-db';
 
 interface ITestUser {
     id?: number | string;

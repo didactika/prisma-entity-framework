@@ -1,9 +1,9 @@
-import { FindByFilterOptions } from "./types/search.types";
-import ModelUtils from "./utils/model-utils";
-import SearchUtils from "./search/search-utils";
+import { FindByFilterOptions } from "./structures/types/search.types";
+import ModelUtils from "./model-utils";
+import SearchUtils from "./search-utils";
 import { isNonEmptyArray } from "./utils/validation-utils";
 import { logError } from "./utils/error-utils";
-import { executeWithOrBatching, deduplicateResults } from "./utils/query-utils";
+import { executeWithOrBatching, deduplicateResults } from "./query-utils";
 import { executeInParallel } from "./utils/parallel-utils";
 import { isParallelEnabled } from "./config";
 

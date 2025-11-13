@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import ModelUtils from '../src/utils/model-utils';
-import { configurePrisma, resetPrismaConfiguration } from '../src/config';
+import ModelUtils from '../src/core/model-utils';
+import { configurePrisma, resetPrismaConfiguration } from '../src/core/config';
 import { mockPrismaClient } from './__mocks__/prisma-client.mock';
 
 describe('ModelUtils', () => {

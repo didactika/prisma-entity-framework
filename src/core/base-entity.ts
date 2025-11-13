@@ -1,7 +1,7 @@
-import { IBaseEntity } from "./interfaces/base-entity.interface";
-import { FindByFilterOptions } from "./types/search.types";
-import DataUtils from "./utils/data-utils";
-import ModelUtils from "./utils/model-utils";
+import { IBaseEntity } from "./structures/interfaces/base-entity.interface";
+import { FindByFilterOptions } from "./structures/types/search.types";
+import DataUtils from "./data-utils";
+import ModelUtils from "./model-utils";
 import { logError } from "./utils/error-utils";
 import { hasChanges as compareHasChanges } from "./utils/comparison-utils";
 import BaseEntityBatch from "./base-entity-batch";

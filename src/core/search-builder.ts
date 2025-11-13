@@ -1,4 +1,4 @@
-import {FindByFilterOptions} from "../types/search.types";
+import {FindByFilterOptions} from "./structures/types/search.types";
 import ConditionUtils from "./condition-utils";
 import ObjectUtils from "./object-utils";
 

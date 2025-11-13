@@ -1,14 +1,13 @@
 import { PrismaClient } from "@prisma/client";
-import DataUtils from "./utils/data-utils";
-import ModelUtils from "./utils/model-utils";
-import { getPrismaInstance } from './config';
+import DataUtils from "./data-utils";
+import ModelUtils from "./model-utils";
+import { getPrismaInstance, isParallelEnabled } from './config';
 import { getDatabaseProviderCached } from "./utils/database-utils";
 import { executeInParallel } from "./utils/parallel-utils";
-import { isParallelEnabled } from "./config";
 import { isNonEmptyArray } from "./utils/validation-utils";
 import { getOptimalBatchSize, processBatches } from "./utils/batch-utils";
 import { logError, handleUniqueConstraintError, withErrorHandling } from "./utils/error-utils";
-import { executeWithOrBatching } from "./utils/query-utils";
+import { executeWithOrBatching } from "./query-utils";
 import { hasChanges as compareHasChanges } from "./utils/comparison-utils";
 import BaseEntityHelpers from "./base-entity-helpers";
 

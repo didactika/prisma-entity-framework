@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import ConditionUtils from '../src/search/condition-utils';
+import ConditionUtils from '../src/core/condition-utils';
 
 describe('ConditionUtils', () => {
   describe('isValid', () => {

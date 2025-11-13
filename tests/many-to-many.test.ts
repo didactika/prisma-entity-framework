@@ -1,6 +1,6 @@
-import BaseEntity from '../src/base-entity';
-import DataUtils from '../src/utils/data-utils';
-import { configurePrisma } from '../src/config';
+import BaseEntity from '../src/core/base-entity';
+import DataUtils from '../src/core/data-utils';
+import { configurePrisma } from '../src/core/config';
 
 // Mock Prisma Client
 const mockPrismaClient = {

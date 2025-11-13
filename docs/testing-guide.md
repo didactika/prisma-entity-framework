@@ -184,5 +184,3 @@ Tests:       69 passed, 82 total
 ```
 
 If you see `X passed` and no `X failed`, everything is working correctly! ✅
-
-For detailed explanation of each expected error, see [Expected Test Errors](expected-test-errors.md).

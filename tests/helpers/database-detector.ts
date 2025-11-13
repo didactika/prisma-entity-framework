@@ -45,15 +45,6 @@ export interface DatabaseCapabilities {
 }
 
 /**
- * Legacy database configuration interface (for backward compatibility)
- */
-export interface DatabaseConfig {
-    provider: DatabaseProvider;
-    schemaFile: string;
-    supportsSkipDuplicates: boolean;
-}
-
-/**
  * Detects comprehensive database capabilities from DATABASE_URL
  * @returns Complete database capabilities object
  */
@@ -121,20 +112,6 @@ export function detectDatabaseCapabilities(): DatabaseCapabilities {
         idType: 'number',
         supportsTransactions: true,
         supportsFullTextSearch: false,
-    };
-}
-
-/**
- * Detects database provider from DATABASE_URL environment variable
- * @returns Database configuration with provider, schema file, and feature support
- * @deprecated Use detectDatabaseCapabilities() for comprehensive capability detection
- */
-export function detectDatabaseProvider(): DatabaseConfig {
-    const capabilities = detectDatabaseCapabilities();
-    return {
-        provider: capabilities.provider,
-        schemaFile: capabilities.schemaFile,
-        supportsSkipDuplicates: capabilities.supportsSkipDuplicates
     };
 }
 
