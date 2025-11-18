@@ -189,7 +189,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      const count = await Subject.createMany(subjectsWithRelations, false, undefined, {
+      const count = await Subject.createMany(subjectsWithRelations, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -224,7 +224,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      const count = await Subject.createMany(subjectsWithoutRelations, false, undefined, {
+      const count = await Subject.createMany(subjectsWithoutRelations, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -248,7 +248,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      await Subject.createMany(subjectsWithRelations, false, undefined, {
+      await Subject.createMany(subjectsWithRelations, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -278,7 +278,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      const result = await Subject.upsertMany(subjectsToUpsert, undefined, {
+      const result = await Subject.upsertMany(subjectsToUpsert, {
         handleRelations: true
       });
 
@@ -312,7 +312,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
           name: 'Biology',
           areas: [{ id: areas[0].id }]
         }
-      ], false, undefined, { handleRelations: true });
+      ], { skipDuplicates: false, handleRelations: true });
 
       expect(createCount).toBe(1);
 
@@ -343,7 +343,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      const result = await Subject.upsertMany(subjectsToUpsert, undefined, {
+      const result = await Subject.upsertMany(subjectsToUpsert, {
         handleRelations: true
       });
 
@@ -369,7 +369,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
           name: 'History',
           areas: [{ id: areas[0].id }]
         }
-      ], false, undefined, { handleRelations: true });
+      ], { skipDuplicates: false, handleRelations: true });
 
       expect(createResult).toBe(1);
 
@@ -400,7 +400,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      const result = await Subject.upsertMany(subjectsToUpsert, undefined, {
+      const result = await Subject.upsertMany(subjectsToUpsert, {
         handleRelations: true
       });
 
@@ -442,7 +442,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
           name: 'Art',
           areas: [{ id: areas[0].id }]
         }
-      ], false, undefined, { handleRelations: true });
+      ], { skipDuplicates: false, handleRelations: true });
 
       // Upsert with same relation (should not create duplicate)
       const subjectsToUpsert = [
@@ -452,7 +452,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      await Subject.upsertMany(subjectsToUpsert, undefined, {
+      await Subject.upsertMany(subjectsToUpsert, {
         handleRelations: true
       });
 
@@ -481,7 +481,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      await Subject.createMany(subjectsWithRelations, false, undefined, {
+      await Subject.createMany(subjectsWithRelations, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -511,7 +511,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
           name: 'Engineering',
           areas: [{ id: areas[0].id }]
         }
-      ], false, undefined, { handleRelations: true });
+      ], { skipDuplicates: false, handleRelations: true });
 
       const subject = await db.client.subject.findFirst({ where: { name: 'Engineering' } });
       const joinRecords = await getJoinTableRecords(subject!.id);
@@ -533,7 +533,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
           name: 'Music',
           areas: [{ id: areas[0].id }, { id: areas[1].id }]
         }
-      ], false, undefined, { handleRelations: true });
+      ], { skipDuplicates: false, handleRelations: true });
 
       const subject = await db.client.subject.findFirst({ where: { name: 'Music' } });
       
@@ -570,7 +570,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      const count = await Subject.createMany(subjectWithConnectFormat, false, undefined, {
+      const count = await Subject.createMany(subjectWithConnectFormat, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -601,7 +601,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
             connect: [{ id: areas[1].id }]
           }
         }
-      ], false, undefined, { handleRelations: true });
+      ], { skipDuplicates: false, handleRelations: true });
 
       expect(count).toBe(2);
 
@@ -639,7 +639,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      const count = await Subject.createMany(subjectWithEmptyConnect, false, undefined, {
+      const count = await Subject.createMany(subjectWithEmptyConnect, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -668,7 +668,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      const count = await Subject.createMany(subjectWithMultipleAreas, false, undefined, {
+      const count = await Subject.createMany(subjectWithMultipleAreas, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -714,7 +714,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      const count = await Subject.createMany(subjectsWithVaryingRelations, false, undefined, {
+      const count = await Subject.createMany(subjectsWithVaryingRelations, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -766,7 +766,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      const count = await Subject.createMany(multipleSubjectsWithMultipleRelations, false, undefined, {
+      const count = await Subject.createMany(multipleSubjectsWithMultipleRelations, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -802,7 +802,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
       ];
 
       // Should not throw error, but handle gracefully
-      const count = await Subject.createMany(subjectWithInvalidIds, false, undefined, {
+      const count = await Subject.createMany(subjectWithInvalidIds, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -833,7 +833,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
       ];
 
       // Should not throw error
-      const count = await Subject.createMany(subjectWithNullValues, false, undefined, {
+      const count = await Subject.createMany(subjectWithNullValues, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -862,7 +862,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         }
       ];
 
-      const count = await Subject.createMany(subjectWithoutAreasField, false, undefined, {
+      const count = await Subject.createMany(subjectWithoutAreasField, { skipDuplicates: false,
         handleRelations: true
       });
 
@@ -891,7 +891,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
       ];
 
       // Should not throw error
-      const count = await Subject.createMany(subjectWithMalformedData, false, undefined, {
+      const count = await Subject.createMany(subjectWithMalformedData, { skipDuplicates: false,
         handleRelations: true
       });
 

@@ -144,7 +144,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
             }));
 
             const startTime = Date.now();
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: db.capabilities.supportsParallel,
                 concurrency: db.capabilities.maxConcurrency
             });
@@ -169,7 +169,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
                 age: 25
             }));
 
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: db.capabilities.supportsParallel,
                 concurrency: db.capabilities.maxConcurrency
             });
@@ -187,7 +187,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
                 age: 25
             }));
 
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: false
             });
 
@@ -212,7 +212,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
 
             // Even if we request parallel, it should fall back to sequential
             const startTime = Date.now();
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: true, // Request parallel
                 concurrency: 4  // Request high concurrency
             });
@@ -233,7 +233,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
                 age: 25
             }));
 
-            const createResult = await TestUser.upsertMany(initialUsers, undefined, {
+            const createResult = await TestUser.upsertMany(initialUsers, {
                 parallel: db.capabilities.supportsParallel,
                 concurrency: db.capabilities.maxConcurrency
             });
@@ -261,7 +261,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
             ];
 
             const startTime = Date.now();
-            const upsertResult = await TestUser.upsertMany(upsertUsers, undefined, {
+            const upsertResult = await TestUser.upsertMany(upsertUsers, {
                 parallel: db.capabilities.supportsParallel,
                 concurrency: db.capabilities.maxConcurrency
             });
@@ -304,7 +304,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
                 }))
             ];
 
-            const result = await TestUser.upsertMany(mixed, undefined, {
+            const result = await TestUser.upsertMany(mixed, {
                 parallel: db.capabilities.supportsParallel,
                 concurrency: db.capabilities.maxConcurrency
             });
@@ -455,7 +455,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
 
             // Create with concurrency matching pool size
             const startTime = Date.now();
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: true,
                 concurrency: db.capabilities.maxConcurrency
             });
@@ -481,7 +481,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
             // Request higher concurrency than recommended
             const requestedConcurrency = db.capabilities.maxConcurrency * 2;
             
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: true,
                 concurrency: requestedConcurrency
             });
@@ -501,7 +501,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
                 age: 25
             }));
 
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: db.capabilities.supportsParallel,
                 concurrency: db.capabilities.maxConcurrency
             });
@@ -588,7 +588,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
                 age: 25
             }));
 
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: true,
                 concurrency: db.capabilities.maxConcurrency
             });
@@ -616,7 +616,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
             // Sequential execution
             await db.clear();
             const seqStart = Date.now();
-            await TestUser.createMany(users, false, undefined, {
+            await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: false
             });
             const seqTime = Date.now() - seqStart;
@@ -624,7 +624,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
             // Parallel execution
             await db.clear();
             const parStart = Date.now();
-            await TestUser.createMany(users, false, undefined, {
+            await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: true,
                 concurrency: db.capabilities.maxConcurrency
             });
@@ -664,9 +664,8 @@ describe('Parallel Batch Operations - Integration Tests', () => {
                 // MySQL and PostgreSQL support skipDuplicates
                 const result = await TestUser.createMany(
                     [...users.slice(0, 10), ...users.slice(50, 100)],
-                    true, // skipDuplicates
-                    undefined,
                     { 
+                        skipDuplicates: true,
                         parallel: db.capabilities.supportsParallel,
                         concurrency: db.capabilities.maxConcurrency
                     }
@@ -679,9 +678,8 @@ describe('Parallel Batch Operations - Integration Tests', () => {
                 // Just create non-duplicate records
                 const result = await TestUser.createMany(
                     users.slice(50, 100),
-                    false,
-                    undefined,
                     { 
+                        skipDuplicates: false,
                         parallel: db.capabilities.supportsParallel,
                         concurrency: db.capabilities.maxConcurrency
                     }
@@ -694,7 +692,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
 
     describe('Edge Cases', () => {
         it('should handle empty arrays', async () => {
-            const count = await TestUser.createMany([], false, undefined, {
+            const count = await TestUser.createMany([], { skipDuplicates: false,
                 parallel: db.capabilities.supportsParallel,
                 concurrency: db.capabilities.maxConcurrency
             });
@@ -706,7 +704,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
                 name: 'Single User',
                 email: 'single@test.com',
                 age: 25
-            }], false, undefined, {
+            }], { skipDuplicates: false,
                 parallel: db.capabilities.supportsParallel,
                 concurrency: db.capabilities.maxConcurrency
             });
@@ -722,7 +720,7 @@ describe('Parallel Batch Operations - Integration Tests', () => {
             }));
 
             const startTime = Date.now();
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: db.capabilities.supportsParallel,
                 concurrency: db.capabilities.maxConcurrency
             });

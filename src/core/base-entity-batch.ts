@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import DataUtils from "./data-utils";
 import ModelUtils from "./model-utils";
-import { getPrismaInstance, isParallelEnabled } from './config';
+import { getPrismaInstance, isParallelEnabled } from "./config";
 import { getDatabaseProviderCached } from "./utils/database-utils";
 import { executeInParallel } from "./utils/parallel-utils";
 import { isNonEmptyArray } from "./utils/validation-utils";
@@ -10,6 +10,9 @@ import { logError, handleUniqueConstraintError, withErrorHandling } from "./util
 import { executeWithOrBatching } from "./query-utils";
 import { hasChanges as compareHasChanges } from "./utils/comparison-utils";
 import BaseEntityHelpers from "./base-entity-helpers";
+import { EntityPrismaModel } from "./structures/interfaces/entity.interface";
+
+type ModelInfo = ReturnType<typeof ModelUtils.getModelInformationCached>;
 
 /**
  * BaseEntityBatch - Helper class for batch operations.
@@ -31,16 +34,17 @@ import BaseEntityHelpers from "./base-entity-helpers";
  *   User.model,
  *   () => User.getModelInformation(),
  *   users,
- *   true, // skipDuplicates
- *   (key) => `${key}Id`,
- *   { parallel: true, concurrency: 4 }
+ *   {
+ *     skipDuplicates: true,
+ *     keyTransformTemplate: (key) => `${key}Id`,
+ *     parallel: true,
+ *     concurrency: 4
+ *   }
  * );
  * ```
  */
 export default class BaseEntityBatch {
-    static readonly MONGODB_TRANSACTION_BATCH_SIZE = 100; // MongoDB transaction limit
-
-
+    static readonly MONGODB_TRANSACTION_BATCH_SIZE = 100;
 
     /**
      * Create multiple entities in batch.
@@ -52,37 +56,16 @@ export default class BaseEntityBatch {
      * @param entityModel - The Prisma model to use for creation
      * @param getModelInformation - Function to get model information
      * @param items - Array of items to create
-     * @param skipDuplicates - Whether to skip duplicate records (database-dependent)
-     * @param keyTransformTemplate - Function to transform relation names to FK field names
-     * @param options - Batch operation options (parallel, concurrency, handleRelations)
+     * @param options - Batch operation options (skipDuplicates, keyTransformTemplate, parallel, concurrency, handleRelations)
      * @returns Promise<number> - Number of entities created
-     * 
-     * @example
-     * ```typescript
-     * const users = [
-     *   { name: 'Alice', email: 'alice@example.com', roles: [{ id: 1 }, { id: 2 }] },
-     *   { name: 'Bob', email: 'bob@example.com', roles: [{ id: 2 }] }
-     * ];
-     * 
-     * const count = await BaseEntityBatch.createMany(
-     *   User.model,
-     *   () => User.getModelInformation(),
-     *   users,
-     *   true,
-     *   (key) => `${key}Id`,
-     *   { parallel: true, concurrency: 4, handleRelations: true }
-     * );
-     * 
-     * console.log(`Created ${count} users with their roles`);
-     * ```
      */
-    public static async createMany<T extends object = Record<string, any>>(
-        entityModel: any,
-        getModelInformation: () => any,
+    public static async createMany<T extends Record<string, unknown> = Record<string, unknown>>(
+        entityModel: EntityPrismaModel<T>,
+        getModelInformation: () => ModelInfo,
         items: Partial<T>[],
-        skipDuplicates = false,
-        keyTransformTemplate: (relationName: string) => string = (key) => `${key}Id`,
         options?: {
+            skipDuplicates?: boolean;
+            keyTransformTemplate?: (relationName: string) => string;
             parallel?: boolean;
             concurrency?: number;
             handleRelations?: boolean;
@@ -93,47 +76,66 @@ export default class BaseEntityBatch {
 
         const prisma = getPrismaInstance();
         const provider = getDatabaseProviderCached(prisma);
-        const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb' && provider != 'sqlserver';
+        const supportsSkipDuplicates =
+            provider !== "sqlite" && provider !== "mongodb" && provider !== "sqlserver";
 
-        let modelInfo: any = null;
+        const skipDuplicates = options?.skipDuplicates ?? false;
+        const keyTransformTemplate =
+            options?.keyTransformTemplate ?? ((key: string) => `${key}Id`);
+
+        let modelInfo: ModelInfo | null = null;
         try {
             modelInfo = getModelInformation();
-        } catch (error) {
-            // Model info not available, continue without it
+        } catch {
         }
 
-        // Extract many-to-many relations if handleRelations is enabled
         const handleRelations = options?.handleRelations !== false;
-        const { cleanedItems: itemsToProcess, relations, relationTypes } = handleRelations
+        const {
+            cleanedItems: itemsToProcess,
+            relations,
+            relationTypes
+        } = handleRelations
             ? DataUtils.extractManyToManyRelations(items, modelInfo)
-            : { cleanedItems: items, relations: new Map(), relationTypes: new Map() };
+            : {
+                  cleanedItems: items,
+                  relations: new Map<number, Record<string, unknown[]>>(),
+                  relationTypes: new Map<string, "explicit" | "implicit">()
+              };
 
-        // Process and deduplicate data
         const processedData = itemsToProcess.map(item => {
             const clean = BaseEntityHelpers.sanitizeKeysRecursive(item);
             const processed = DataUtils.processRelations(clean, modelInfo);
             return DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
         });
 
-        const deduplicatedData = BaseEntityHelpers.deduplicateByUniqueConstraints(processedData, entityModel.name);
+        const deduplicatedData = BaseEntityHelpers.deduplicateByUniqueConstraints(
+            processedData,
+            entityModel.name
+        );
 
         if (deduplicatedData.length < processedData.length) {
-            logError('createMany - deduplication', new Error('Duplicate records removed from batch'), { 
-                modelName: entityModel.name,
-                removed: processedData.length - deduplicatedData.length,
-                original: processedData.length,
-                deduplicated: deduplicatedData.length
-            });
+            logError(
+                "createMany - deduplication",
+                new Error("Duplicate records removed from batch"),
+                {
+                    modelName: entityModel.name,
+                    removed: processedData.length - deduplicatedData.length,
+                    original: processedData.length,
+                    deduplicated: deduplicatedData.length
+                }
+            );
         }
 
-        const batchSize = getOptimalBatchSize('createMany', provider);
+        const batchSize = getOptimalBatchSize("createMany", provider);
         const useParallel = options?.parallel !== false && isParallelEnabled();
 
         const result = await processBatches(
             deduplicatedData,
             batchSize,
-            async (batch) => {
-                const createOptions: any = { data: batch };
+            async batch => {
+                const createOptions: { data: Record<string, unknown>[]; skipDuplicates?: boolean } = {
+                    data: batch
+                };
                 if (skipDuplicates && supportsSkipDuplicates) {
                     createOptions.skipDuplicates = true;
                 }
@@ -151,7 +153,7 @@ export default class BaseEntityBatch {
                             });
                             return retryResult.count;
                         },
-                        `createMany batch`
+                        "createMany batch"
                     );
                 } else {
                     const createResult = await entityModel.createMany(createOptions);
@@ -167,93 +169,95 @@ export default class BaseEntityBatch {
         const totalCreated = result.results.reduce((sum, count) => sum + count, 0);
 
         if (result.errors.length > 0) {
-            logError('createMany - parallel batches', new Error(`${result.errors.length} batches failed`), { failedCount: result.errors.length });
+            logError(
+                "createMany - parallel batches",
+                new Error(`${result.errors.length} batches failed`),
+                { failedCount: result.errors.length }
+            );
         }
 
-        // Apply many-to-many relations if we have any
         if (handleRelations && relations.size > 0 && totalCreated > 0) {
             const uniqueConstraints = ModelUtils.getUniqueConstraints(entityModel.name);
 
             if (uniqueConstraints.length > 0) {
-                const orConditions = deduplicatedData.map(item => {
-                    for (const constraint of uniqueConstraints) {
-                        const constraintCondition: Record<string, any> = {};
-                        let hasAllFields = true;
+                const orConditions = deduplicatedData
+                    .map(item => {
+                        for (const constraint of uniqueConstraints) {
+                            const constraintCondition: Record<string, unknown> = {};
+                            let hasAllFields = true;
 
-                        for (const field of constraint) {
-                            if (item[field] !== undefined && item[field] !== null) {
-                                constraintCondition[field] = item[field];
-                            } else {
-                                hasAllFields = false;
-                                break;
+                            for (const field of constraint) {
+                                const value = item[field];
+                                if (value !== undefined && value !== null) {
+                                    constraintCondition[field] = value;
+                                } else {
+                                    hasAllFields = false;
+                                    break;
+                                }
+                            }
+
+                            if (hasAllFields && Object.keys(constraintCondition).length > 0) {
+                                return constraintCondition;
                             }
                         }
-
-                        if (hasAllFields && Object.keys(constraintCondition).length > 0) {
-                            return constraintCondition;
-                        }
-                    }
-                    return null;
-                }).filter(Boolean);
+                        return null;
+                    })
+                    .filter(Boolean) as Record<string, unknown>[];
 
                 if (orConditions.length > 0) {
                     try {
-                        // Fetch records with full data to match them back to original items
                         const createdRecords = await entityModel.findMany({
                             where: { OR: orConditions }
                         });
 
-                        // Build a map of unique constraint values to record IDs
-                        // This ensures we match the correct ID to each item in the original order
-                        const recordMap = new Map<string, any>();
+                        const recordMap = new Map<string, T & { id: number | string }>();
                         for (const record of createdRecords) {
                             for (const constraint of uniqueConstraints) {
                                 const keyParts: string[] = [];
                                 let hasAllFields = true;
-                                
+
                                 for (const field of constraint) {
-                                    if (record[field] !== undefined && record[field] !== null) {
-                                        keyParts.push(`${field}:${record[field]}`);
+                                    const value = (record as Record<string, unknown>)[field];
+                                    if (value !== undefined && value !== null) {
+                                        keyParts.push(`${field}:${value}`);
                                     } else {
                                         hasAllFields = false;
                                         break;
                                     }
                                 }
-                                
+
                                 if (hasAllFields) {
-                                    const key = keyParts.join('|');
+                                    const key = keyParts.join("|");
                                     recordMap.set(key, record);
                                     break;
                                 }
                             }
                         }
 
-                        // Match fetched records to ORIGINAL items (not deduplicated) to preserve index mapping
-                        // The relations Map uses indices from the original items array
                         const fetchedIds: (number | string)[] = [];
                         for (let i = 0; i < itemsToProcess.length; i++) {
-                            const item = itemsToProcess[i] as Record<string, any>;
-                            
-                            // Only process items that have relations
+                            const item = itemsToProcess[i] as Record<string, unknown>;
+
                             if (!relations.has(i)) {
                                 continue;
                             }
-                            
+
                             for (const constraint of uniqueConstraints) {
                                 const keyParts: string[] = [];
                                 let hasAllFields = true;
-                                
+
                                 for (const field of constraint) {
-                                    if (item[field] !== undefined && item[field] !== null) {
-                                        keyParts.push(`${field}:${item[field]}`);
+                                    const value = item[field];
+                                    if (value !== undefined && value !== null) {
+                                        keyParts.push(`${field}:${value}`);
                                     } else {
                                         hasAllFields = false;
                                         break;
                                     }
                                 }
-                                
+
                                 if (hasAllFields) {
-                                    const key = keyParts.join('|');
+                                    const key = keyParts.join("|");
                                     const record = recordMap.get(key);
                                     if (record) {
                                         fetchedIds.push(record.id);
@@ -277,14 +281,22 @@ export default class BaseEntityBatch {
                             );
 
                             if (relationResult.failed > 0) {
-                                logError('createMany - apply relations', new Error('Failed to apply many-to-many relations'), { 
-                                    failedCount: relationResult.failed,
-                                    successCount: relationResult.success
-                                });
+                                logError(
+                                    "createMany - apply relations",
+                                    new Error("Failed to apply many-to-many relations"),
+                                    {
+                                        failedCount: relationResult.failed,
+                                        successCount: relationResult.success
+                                    }
+                                );
                             }
                         }
                     } catch (error) {
-                        logError('createMany - apply relations', error as Error, { modelName: entityModel.name });
+                        logError(
+                            "createMany - apply relations",
+                            error as Error,
+                            { modelName: entityModel.name }
+                        );
                     }
                 }
             }
@@ -305,36 +317,19 @@ export default class BaseEntityBatch {
      * @param getModelInformation - Function to get model information
      * @param updateManyByIdFn - Function to perform batch updates
      * @param items - Array of items to upsert
-     * @param keyTransformTemplate - Function to transform relation names to FK field names
-     * @param options - Batch operation options (parallel, concurrency, handleRelations)
+     * @param options - Batch operation options (keyTransformTemplate, parallel, concurrency, handleRelations)
      * @returns Promise with created, updated, unchanged, and total counts
-     * 
-     * @example
-     * ```typescript
-     * const users = [
-     *   { email: 'alice@example.com', name: 'Alice Updated' },
-     *   { email: 'charlie@example.com', name: 'Charlie New' }
-     * ];
-     * 
-     * const result = await BaseEntityBatch.upsertMany(
-     *   User.model,
-     *   () => User.getModelInformation(),
-     *   (data, opts) => User.updateManyById(data, opts),
-     *   users,
-     *   (key) => `${key}Id`,
-     *   { parallel: true }
-     * );
-     * 
-     * console.log(`Created: ${result.created}, Updated: ${result.updated}, Unchanged: ${result.unchanged}`);
-     * ```
      */
-    public static async upsertMany<T extends object = Record<string, any>>(
-        entityModel: any,
-        getModelInformation: () => any,
-        updateManyByIdFn: (dataList: Array<Partial<any>>, options?: any) => Promise<number>,
+    public static async upsertMany<T extends Record<string, unknown> = Record<string, unknown>>(
+        entityModel: EntityPrismaModel<T>,
+        getModelInformation: () => ModelInfo,
+        updateManyByIdFn: (
+            dataList: Array<Partial<T> & { id: number | string }>,
+            options?: { parallel?: boolean; concurrency?: number }
+        ) => Promise<number>,
         items: Partial<T>[],
-        keyTransformTemplate: (relationName: string) => string = (key) => `${key}Id`,
         options?: {
+            keyTransformTemplate?: (relationName: string) => string;
             parallel?: boolean;
             concurrency?: number;
             handleRelations?: boolean;
@@ -349,39 +344,47 @@ export default class BaseEntityBatch {
         const uniqueConstraints = ModelUtils.getUniqueConstraints(modelName);
 
         if (!uniqueConstraints || uniqueConstraints.length === 0) {
-            throw new Error(`No unique constraints found for model ${modelName}. Cannot perform upsert.`);
+            throw new Error(
+                `No unique constraints found for model ${modelName}. Cannot perform upsert.`
+            );
         }
 
-        let modelInfo: any = null;
+        const keyTransformTemplate =
+            options?.keyTransformTemplate ?? ((key: string) => `${key}Id`);
+
+        let modelInfo: ModelInfo | null = null;
         try {
             modelInfo = getModelInformation();
-        } catch (error) {
-            // Model info not available, continue without it
+        } catch {
         }
 
-        // Extract many-to-many relations if handleRelations is enabled
         const handleRelations = options?.handleRelations !== false;
-        const { cleanedItems: itemsToProcess, relations, relationTypes } = handleRelations
+        const {
+            cleanedItems: itemsToProcess,
+            relations,
+            relationTypes
+        } = handleRelations
             ? DataUtils.extractManyToManyRelations(items, modelInfo)
-            : { cleanedItems: items, relations: new Map(), relationTypes: new Map() };
+            : {
+                  cleanedItems: items,
+                  relations: new Map<number, Record<string, unknown[]>>(),
+                  relationTypes: new Map<string, "explicit" | "implicit">()
+              };
 
-        // Process and normalize all items
         const normalizedItems = itemsToProcess.map(item => {
             const clean = BaseEntityHelpers.sanitizeKeysRecursive(item);
             const processed = DataUtils.processRelations(clean, modelInfo);
             return DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
         });
 
-        // Build batch query to fetch all existing records
-        // Pre-allocate arrays for better performance
-        const orConditions: any[] = [];
-        const itemConstraintMap = new Map<number, any[]>();
+        const orConditions: Record<string, unknown>[] = [];
+        const itemConstraintMap = new Map<number, Record<string, unknown>[]>();
 
         for (let index = 0; index < normalizedItems.length; index++) {
             const normalized = normalizedItems[index];
-            
+
             for (const constraint of uniqueConstraints) {
-                const whereClause: Record<string, any> = {};
+                const whereClause: Record<string, unknown> = {};
                 let hasAllFields = true;
 
                 for (const field of constraint) {
@@ -407,12 +410,11 @@ export default class BaseEntityBatch {
             }
         }
 
-        // Fetch all existing records using query-utils.executeWithOrBatching
-        let existingRecords: T[] = [];
+        let existingRecords: Array<T & { id: number | string }> = [];
         if (orConditions.length > 0) {
             try {
                 const fieldsPerCondition = uniqueConstraints[0]?.length || 1;
-                existingRecords = await executeWithOrBatching<T & { id: any }>(
+                existingRecords = await executeWithOrBatching<T & { id: number | string }>(
                     entityModel,
                     orConditions,
                     {
@@ -420,58 +422,62 @@ export default class BaseEntityBatch {
                         concurrency: options?.concurrency,
                         fieldsPerCondition
                     }
-                ) as T[];
+                );
             } catch (error) {
-                logError('upsertMany - fetch existing records', error as Error);
+                logError("upsertMany - fetch existing records", error as Error);
             }
         }
 
-        // Create a map for quick lookup of existing records
-        // Use Map for O(1) lookups
-        const existingMap = new Map<string, T>();
+        const existingMap = new Map<string, T & { id: number | string }>();
         for (const record of existingRecords) {
             for (const constraint of uniqueConstraints) {
-                // Optimize key building with array join
                 const keyParts: string[] = new Array(constraint.length);
                 for (let i = 0; i < constraint.length; i++) {
-                    keyParts[i] = `${constraint[i]}:${(record as any)[constraint[i]]}`;
+                    const field = constraint[i];
+                    keyParts[i] = `${field}:${(record as Record<string, unknown>)[field]}`;
                 }
-                const key = keyParts.join('|');
+                const key = keyParts.join("|");
                 existingMap.set(key, record);
             }
         }
 
-        // Categorize items: to create, to update, unchanged
-        // Track original indices for relation mapping
-        const toCreate: any[] = [];
-        const toCreateIndices: number[] = []; // Track original indices
-        const toUpdate: Array<{ id: number; data: any; originalIndex: number }> = [];
+        const toCreate: Record<string, unknown>[] = [];
+        const toCreateIndices: number[] = [];
+        const toUpdate: Array<{
+            id: number | string;
+            data: Record<string, unknown>;
+            originalIndex: number;
+        }> = [];
         let unchanged = 0;
 
         for (let index = 0; index < normalizedItems.length; index++) {
             const normalized = normalizedItems[index];
             const constraints = itemConstraintMap.get(index);
-            let existingRecord: T | undefined;
+            let existingRecord: (T & { id: number | string }) | undefined;
 
             if (constraints) {
                 for (const constraint of constraints) {
-                    // Optimize key building with array operations
                     const constraintKeys = Object.keys(constraint);
                     const keyParts: string[] = new Array(constraintKeys.length);
                     for (let i = 0; i < constraintKeys.length; i++) {
                         const field = constraintKeys[i];
                         keyParts[i] = `${field}:${constraint[field]}`;
                     }
-                    const key = keyParts.join('|');
+                    const key = keyParts.join("|");
                     existingRecord = existingMap.get(key);
                     if (existingRecord) break;
                 }
             }
 
             if (existingRecord) {
-                if (compareHasChanges(normalized, existingRecord as Record<string, unknown>)) {
+                if (
+                    compareHasChanges(
+                        normalized as Record<string, unknown>,
+                        existingRecord as Record<string, unknown>
+                    )
+                ) {
                     toUpdate.push({
-                        id: (existingRecord as any).id,
+                        id: existingRecord.id,
                         data: normalized,
                         originalIndex: index
                     });
@@ -480,15 +486,15 @@ export default class BaseEntityBatch {
                 }
             } else {
                 toCreate.push(normalized);
-                toCreateIndices.push(index); // Track original index
+                toCreateIndices.push(index);
             }
         }
 
-        // Execute batch operations
         let created = 0;
         let updated = 0;
 
-        const useParallel = options?.parallel !== false &&
+        const useParallel =
+            options?.parallel !== false &&
             isParallelEnabled() &&
             (toCreate.length > 0 && toUpdate.length > 0);
 
@@ -499,18 +505,21 @@ export default class BaseEntityBatch {
                 operations.push(async () => {
                     const prisma = getPrismaInstance();
                     const provider = getDatabaseProviderCached(prisma);
-                    const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb';
+                    const supportsSkipDuplicates = provider !== "sqlite" && provider !== "mongodb";
 
                     return await withErrorHandling(
                         async () => {
-                            const createOptions: any = { data: toCreate };
+                            const createOptions: {
+                                data: Record<string, unknown>[];
+                                skipDuplicates?: boolean;
+                            } = { data: toCreate };
                             if (supportsSkipDuplicates) {
                                 createOptions.skipDuplicates = true;
                             }
                             const result = await entityModel.createMany(createOptions);
                             return result.count;
                         },
-                        'batch create',
+                        "batch create",
                         async () => {
                             let count = 0;
                             for (const data of toCreate) {
@@ -518,7 +527,7 @@ export default class BaseEntityBatch {
                                     await entityModel.create({ data });
                                     count++;
                                 } catch (err) {
-                                    logError('individual create', err as Error);
+                                    logError("individual create", err as Error);
                                 }
                             }
                             return count;
@@ -531,18 +540,22 @@ export default class BaseEntityBatch {
                 operations.push(async () => {
                     return await withErrorHandling(
                         async () => {
-                            const updateData = toUpdate.map(({ id, data }) => ({ id, ...data }));
+                            const updateData: Array<Partial<T> & { id: number | string }> =
+                                toUpdate.map(({ id, data }) => ({ id, ...(data as T) }));
                             return await updateManyByIdFn(updateData, { parallel: false });
                         },
-                        'batch update',
+                        "batch update",
                         async () => {
                             let count = 0;
                             for (const { id, data } of toUpdate) {
                                 try {
-                                    await entityModel.update({ where: { id }, data });
+                                    await entityModel.update({
+                                        where: { id },
+                                        data
+                                    });
                                     count++;
                                 } catch (err) {
-                                    logError('individual update', err as Error);
+                                    logError("individual update", err as Error);
                                 }
                             }
                             return count;
@@ -564,25 +577,31 @@ export default class BaseEntityBatch {
             }
 
             if (result.errors.length > 0) {
-                logError('upsertMany - parallel operations', new Error(`${result.errors.length} operations failed`), { failedCount: result.errors.length });
+                logError(
+                    "upsertMany - parallel operations",
+                    new Error(`${result.errors.length} operations failed`),
+                    { failedCount: result.errors.length }
+                );
             }
         } else {
-            // Execute sequentially
             if (toCreate.length > 0) {
                 const prisma = getPrismaInstance();
                 const provider = getDatabaseProviderCached(prisma);
-                const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb';
+                const supportsSkipDuplicates = provider !== "sqlite" && provider !== "mongodb";
 
                 created = await withErrorHandling(
                     async () => {
-                        const createOptions: any = { data: toCreate };
+                        const createOptions: {
+                            data: Record<string, unknown>[];
+                            skipDuplicates?: boolean;
+                        } = { data: toCreate };
                         if (supportsSkipDuplicates) {
                             createOptions.skipDuplicates = true;
                         }
                         const result = await entityModel.createMany(createOptions);
                         return result.count;
                     },
-                    'batch create',
+                    "batch create",
                     async () => {
                         let count = 0;
                         for (const data of toCreate) {
@@ -590,7 +609,7 @@ export default class BaseEntityBatch {
                                 await entityModel.create({ data });
                                 count++;
                             } catch (err) {
-                                logError('individual create', err as Error);
+                                logError("individual create", err as Error);
                             }
                         }
                         return count;
@@ -601,15 +620,19 @@ export default class BaseEntityBatch {
             if (toUpdate.length > 0) {
                 updated = await withErrorHandling(
                     async () => {
-                        const updateData = toUpdate.map(({ id, data }) => ({ id, ...data }));
+                        const updateData: Array<Partial<T> & { id: number | string }> =
+                            toUpdate.map(({ id, data }) => ({ id, ...(data as T) }));
                         return await updateManyByIdFn(updateData, { parallel: false });
                     },
-                    'batch update',
+                    "batch update",
                     async () => {
                         let count = 0;
                         for (const { id, data } of toUpdate) {
                             try {
-                                await entityModel.update({ where: { id }, data });
+                                await entityModel.update({
+                                    where: { id },
+                                    data
+                                });
                                 count++;
                             } catch (err) {
                                 logError(`individual update for record ${id}`, err as Error);
@@ -621,62 +644,63 @@ export default class BaseEntityBatch {
             }
         }
 
-        // Apply many-to-many relations if we have any
         if (handleRelations && relations.size > 0 && (created > 0 || updated > 0)) {
-            // Build a map of entity IDs to original indices for relation mapping
             const entityIdToIndexMap = new Map<number | string, number>();
 
             if (created > 0 && toCreate.length > 0) {
-                const createdOrConditions = toCreate.map(item => {
-                    for (const constraint of uniqueConstraints) {
-                        const whereClause: Record<string, any> = {};
-                        let hasAllFields = true;
+                const createdOrConditions = toCreate
+                    .map(item => {
+                        for (const constraint of uniqueConstraints) {
+                            const whereClause: Record<string, unknown> = {};
+                            let hasAllFields = true;
 
-                        for (const field of constraint) {
-                            if (item[field] !== undefined && item[field] !== null) {
-                                whereClause[field] = item[field];
-                            } else {
-                                hasAllFields = false;
-                                break;
+                            for (const field of constraint) {
+                                const value = item[field];
+                                if (value !== undefined && value !== null) {
+                                    whereClause[field] = value;
+                                } else {
+                                    hasAllFields = false;
+                                    break;
+                                }
+                            }
+
+                            if (hasAllFields && Object.keys(whereClause).length > 0) {
+                                return whereClause;
                             }
                         }
-
-                        if (hasAllFields && Object.keys(whereClause).length > 0) {
-                            return whereClause;
-                        }
-                    }
-                    return null;
-                }).filter(Boolean);
+                        return null;
+                    })
+                    .filter(Boolean) as Record<string, unknown>[];
 
                 if (createdOrConditions.length > 0) {
                     try {
                         const createdRecords = await entityModel.findMany({
                             where: { OR: createdOrConditions }
                         });
-                        
-                        // Match created records back to original indices
+
                         for (let i = 0; i < toCreate.length; i++) {
                             const item = toCreate[i];
                             const originalIndex = toCreateIndices[i];
-                            
-                            // Only process if this item has relations
+
                             if (!relations.has(originalIndex)) {
                                 continue;
                             }
-                            
-                            // Find the matching record
+
                             for (const record of createdRecords) {
                                 let matches = true;
                                 for (const constraint of uniqueConstraints) {
                                     for (const field of constraint) {
-                                        if (item[field] !== record[field]) {
+                                        if (
+                                            item[field] !==
+                                            (record as Record<string, unknown>)[field]
+                                        ) {
                                             matches = false;
                                             break;
                                         }
                                     }
                                     if (matches) break;
                                 }
-                                
+
                                 if (matches) {
                                     entityIdToIndexMap.set(record.id, originalIndex);
                                     break;
@@ -684,7 +708,7 @@ export default class BaseEntityBatch {
                             }
                         }
                     } catch (error) {
-                        logError('upsertMany - fetch created IDs', error as Error);
+                        logError("upsertMany - fetch created IDs", error as Error);
                     }
                 }
             }
@@ -697,10 +721,9 @@ export default class BaseEntityBatch {
                 }
             }
 
-            // Build arrays for applyManyToManyRelations
             const allEntityIds: (number | string)[] = [];
             const remappedRelations = new Map<number, Record<string, unknown[]>>();
-            
+
             let newIndex = 0;
             for (const [entityId, originalIndex] of entityIdToIndexMap.entries()) {
                 allEntityIds.push(entityId);
@@ -726,13 +749,17 @@ export default class BaseEntityBatch {
                     );
 
                     if (relationResult.failed > 0) {
-                        logError('upsertMany - apply relations', new Error('Failed to apply many-to-many relations'), { 
-                            failedCount: relationResult.failed,
-                            successCount: relationResult.success
-                        });
+                        logError(
+                            "upsertMany - apply relations",
+                            new Error("Failed to apply many-to-many relations"),
+                            {
+                                failedCount: relationResult.failed,
+                                successCount: relationResult.success
+                            }
+                        );
                     }
                 } catch (error) {
-                    logError('upsertMany - apply relations', error as Error);
+                    logError("upsertMany - apply relations", error as Error);
                 }
             }
         }
@@ -758,32 +785,20 @@ export default class BaseEntityBatch {
      * @param dataList - Array of data to update (must include id field)
      * @param options - Batch operation options (parallel, concurrency)
      * @returns Promise<number> - Number of entities updated
-     * 
-     * @example
-     * ```typescript
-     * const updates = [
-     *   { id: 1, name: 'Alice Updated', status: 'active' },
-     *   { id: 2, name: 'Bob Updated', status: 'inactive' }
-     * ];
-     * 
-     * const count = await BaseEntityBatch.updateManyById(
-     *   User.model,
-     *   () => User.getModelInformation(),
-     *   BaseEntityHelpers.buildUpdateQuery,
-     *   BaseEntityHelpers.prepareUpdateList,
-     *   updates,
-     *   { parallel: true, concurrency: 4 }
-     * );
-     * 
-     * console.log(`Updated ${count} users`);
-     * ```
      */
     public static async updateManyById(
-        entityModel: any,
-        getModelInformation: () => any,
-        buildUpdateQueryFn: (batch: Array<Record<string, any>>, tableName: string, modelInfo?: any) => { query: string | null; idsInBatch: Set<number> },
-        prepareUpdateListFn: (dataList: Array<Partial<any>>, modelInfo?: any) => Array<Record<string, any>>,
-        dataList: Array<Partial<any>>,
+        entityModel: EntityPrismaModel<Record<string, unknown>>,
+        getModelInformation: () => ModelInfo,
+        buildUpdateQueryFn: (
+            batch: Array<Record<string, unknown>>,
+            tableName: string,
+            modelInfo?: ModelInfo
+        ) => { query: string | null; idsInBatch: Set<number> },
+        prepareUpdateListFn: (
+            dataList: Array<Partial<Record<string, unknown>>>,
+            modelInfo?: ModelInfo
+        ) => Array<Record<string, unknown>>,
+        dataList: Array<Partial<Record<string, unknown>>>,
         options?: {
             parallel?: boolean;
             concurrency?: number;
@@ -794,7 +809,7 @@ export default class BaseEntityBatch {
         const prisma = getPrismaInstance();
         const provider = getDatabaseProviderCached(prisma);
         const modelInfo = getModelInformation();
-        const tableName = modelInfo.dbName || modelInfo.name || entityModel?.name;
+        const tableName = (modelInfo as any).dbName || modelInfo.name || entityModel?.name;
 
         if (!tableName) {
             throw new Error("Could not determine table name for updateManyById");
@@ -802,28 +817,28 @@ export default class BaseEntityBatch {
 
         const formattedList = prepareUpdateListFn(dataList, modelInfo);
 
-        // MongoDB: Use optimized batch transactions
-        if (provider === 'mongodb') {
+        if (provider === "mongodb") {
             return await this.updateManyByIdMongoDB(formattedList, entityModel, prisma);
         }
 
-        // SQL databases use optimized batch update query
-        const batchSize = getOptimalBatchSize('updateMany', provider);
+        const batchSize = getOptimalBatchSize("updateMany", provider);
         const useParallel = options?.parallel !== false && isParallelEnabled();
 
         const result = await processBatches(
             formattedList,
             batchSize,
-            async (batch) => {
+            async batch => {
                 const { query } = buildUpdateQueryFn(batch, tableName, modelInfo);
                 if (!query) return 0;
 
                 return await withErrorHandling(
                     async () => {
-                        const updateResult = await (prisma as unknown as PrismaClient).$executeRawUnsafe(query);
+                        const updateResult = await (prisma as unknown as PrismaClient).$executeRawUnsafe(
+                            query
+                        );
                         return updateResult as number;
                     },
-                    'batch update'
+                    "batch update"
                 );
             },
             {
@@ -835,7 +850,11 @@ export default class BaseEntityBatch {
         const totalUpdated = result.results.reduce((sum, count) => sum + count, 0);
 
         if (result.errors.length > 0) {
-            logError('updateManyById - parallel batches', new Error(`${result.errors.length} batches failed`), { failedCount: result.errors.length });
+            logError(
+                "updateManyById - parallel batches",
+                new Error(`${result.errors.length} batches failed`),
+                { failedCount: result.errors.length }
+            );
         }
 
         return totalUpdated;
@@ -852,12 +871,11 @@ export default class BaseEntityBatch {
      * @param prisma - Prisma client instance
      * @returns Promise<number> - Number of entities updated
      * 
-     * @private
      * @internal
      */
     public static async updateManyByIdMongoDB(
-        formattedList: Array<Record<string, any>>,
-        entityModel: any,
+        formattedList: Array<Record<string, unknown>>,
+        entityModel: EntityPrismaModel<Record<string, unknown>>,
         prisma: PrismaClient
     ): Promise<number> {
         let totalUpdated = 0;
@@ -869,29 +887,42 @@ export default class BaseEntityBatch {
             try {
                 const results = await (prisma as any).$transaction(
                     batch.map(item => {
-                        const { id, ...data } = item;
+                        const { id, ...data } = item as { id: number | string } & Record<
+                            string,
+                            unknown
+                        >;
                         return entityModel.update({ where: { id }, data });
                     }),
                     {
                         maxWait: 5000,
-                        timeout: 10000,
+                        timeout: 10000
                     }
                 );
                 totalUpdated += results.length;
             } catch (error) {
-                logError('updateManyByIdMongoDB - batch update', error as Error, { 
-                    batchStart: i + 1,
-                    batchEnd: Math.min(i + batch.length, formattedList.length)
-                });
+                logError(
+                    "updateManyByIdMongoDB - batch update",
+                    error as Error,
+                    {
+                        batchStart: i + 1,
+                        batchEnd: Math.min(i + batch.length, formattedList.length)
+                    }
+                );
 
-                // Fallback to individual updates for this batch
                 for (const item of batch) {
-                    const { id, ...data } = item;
+                    const { id, ...data } = item as { id: number | string } & Record<
+                        string,
+                        unknown
+                    >;
                     try {
                         await entityModel.update({ where: { id }, data });
                         totalUpdated++;
                     } catch (itemError) {
-                        logError('updateManyByIdMongoDB - individual update', itemError as Error, { recordId: id });
+                        logError(
+                            "updateManyByIdMongoDB - individual update",
+                            itemError as Error,
+                            { recordId: id }
+                        );
                     }
                 }
             }
@@ -910,23 +941,10 @@ export default class BaseEntityBatch {
      * @param ids - Array of entity IDs to delete
      * @param options - Batch operation options (parallel, concurrency)
      * @returns Promise<number> - Number of entities deleted
-     * 
-     * @example
-     * ```typescript
-     * const idsToDelete = [1, 2, 3, 4, 5];
-     * 
-     * const count = await BaseEntityBatch.deleteByIds(
-     *   User.model,
-     *   idsToDelete,
-     *   { parallel: true, concurrency: 4 }
-     * );
-     * 
-     * console.log(`Deleted ${count} users`);
-     * ```
      */
     public static async deleteByIds(
-        entityModel: any,
-        ids: any[],
+        entityModel: Pick<EntityPrismaModel<Record<string, unknown>>, "deleteMany">,
+        ids: Array<number | string>,
         options?: {
             parallel?: boolean;
             concurrency?: number;
@@ -935,20 +953,20 @@ export default class BaseEntityBatch {
         if (!entityModel) throw new Error("The model is not defined in the BaseEntity class.");
         if (!isNonEmptyArray(ids)) return 0;
 
-        const batchSize = getOptimalBatchSize('delete');
+        const batchSize = getOptimalBatchSize("delete");
         const useParallel = options?.parallel !== false && isParallelEnabled();
 
         const result = await processBatches(
             ids,
             batchSize,
-            async (batch) => {
+            async batch => {
                 try {
                     const deleteResult = await entityModel.deleteMany({
                         where: { id: { in: batch } }
                     });
                     return deleteResult.count || 0;
                 } catch (error) {
-                    logError('deleteByIds', error as Error, { batchSize: batch.length });
+                    logError("deleteByIds", error as Error, { batchSize: batch.length });
                     throw error;
                 }
             },
@@ -961,7 +979,11 @@ export default class BaseEntityBatch {
         const totalDeleted = result.results.reduce((sum, count) => sum + count, 0);
 
         if (result.errors.length > 0) {
-            logError('deleteByIds - parallel batches', new Error(`${result.errors.length} batches failed`), { failedCount: result.errors.length });
+            logError(
+                "deleteByIds - parallel batches",
+                new Error(`${result.errors.length} batches failed`),
+                { failedCount: result.errors.length }
+            );
         }
 
         return totalDeleted;

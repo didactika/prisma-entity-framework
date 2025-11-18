@@ -58,14 +58,26 @@ Count records matching filter.
 const count = await User.countByFilter({ isActive: true });
 ```
 
-#### `createMany<T>(items, skipDuplicates?): Promise<number>`
+#### `createMany<T>(items, options?): Promise<number>`
 Bulk create with automatic batching and retry logic.
+
+**Parameters:**
+- `items` - Array of entities to create
+- `options.skipDuplicates` - Skip duplicate records (database-dependent)
+- `options.keyTransformTemplate` - Function to transform relation names to FK field names
+- `options.parallel` - Enable parallel execution
+- `options.concurrency` - Number of concurrent operations
+- `options.handleRelations` - Handle many-to-many relations (default: true)
 
 ```typescript
 const count = await User.createMany([
     { name: "User 1", email: "user1@example.com" },
     { name: "User 2", email: "user2@example.com" }
-], true);  // skipDuplicates
+], { 
+    skipDuplicates: true,
+    parallel: true,
+    concurrency: 4
+});
 ```
 
 #### `updateManyById<T>(dataList): Promise<number>`
@@ -78,24 +90,41 @@ const updated = await User.updateManyById([
 ]);
 ```
 
-#### `upsert<T>(data): Promise<T>`
+#### `upsert<T>(data, options?): Promise<T>`
 Create or update based on unique constraints. Only updates if changes detected.
 
+**Parameters:**
+- `data` - Entity data to upsert
+- `options.keyTransformTemplate` - Function to transform relation names to FK field names
+
 ```typescript
-const user = await User.upsert({
-    email: "john@example.com",  // Unique field
-    name: "John Doe"
-});
+const user = await User.upsert(
+    {
+        email: "john@example.com",  // Unique field
+        name: "John Doe"
+    },
+    { keyTransformTemplate: (key) => `${key}Id` }
+);
 ```
 
-#### `upsertMany<T>(items): Promise<UpsertResult>`
+#### `upsertMany<T>(items, options?): Promise<UpsertResult>`
 Batch upsert with statistics.
+
+**Parameters:**
+- `items` - Array of entities to upsert
+- `options.keyTransformTemplate` - Function to transform relation names to FK field names
+- `options.parallel` - Enable parallel execution
+- `options.concurrency` - Number of concurrent operations
+- `options.handleRelations` - Handle many-to-many relations (default: true)
 
 ```typescript
 const result = await User.upsertMany([
     { email: 'user1@example.com', name: 'User 1' },
     { email: 'user2@example.com', name: 'User 2' },
-]);
+], {
+    parallel: true,
+    concurrency: 4
+});
 // { created: 2, updated: 1, unchanged: 0, total: 3 }
 ```
 

@@ -40,12 +40,12 @@ interface IUser {
 class User extends BaseEntity<IUser> implements IUser {
   static readonly model: any;
 
-  public declare readonly id?: number | string;
+  public declare readonly id?: IUser['id'];
 
-  @Property() declare name: string;
-  @Property() declare email: string;
-  @Property() declare age?: number;
-  @Property() declare isActive: boolean;
+  @Property() declare name: IUser['name'];
+  @Property() declare email: IUser['email'];
+  @Property() declare age: IUser['age'];
+  @Property() declare isActive: IUser['isActive'];
 
   constructor(data?: Partial<IUser>) {
     super(data);
@@ -585,7 +585,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       if (db.capabilities.supportsSkipDuplicates) {
         // MySQL and PostgreSQL support skipDuplicates
         console.log(`✅ Testing skipDuplicates on ${db.provider} (supported)`);
-        const count = await User.createMany(users, true);
+        const count = await User.createMany(users, { skipDuplicates: true });
         expect(count).toBeGreaterThanOrEqual(1);
 
         // Verify that only non-duplicate was created
@@ -596,7 +596,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         console.log(`⏭️  Skipping skipDuplicates test on ${db.provider} (not supported)`);
         // Should either throw an error or create only valid records
         try {
-          await User.createMany(users, true);
+          await User.createMany(users, { skipDuplicates: true });
           // If it succeeds, verify behavior
           const allUsers = await prisma.user.findMany();
           expect(allUsers.length).toBeGreaterThanOrEqual(1);

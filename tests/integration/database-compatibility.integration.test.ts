@@ -97,7 +97,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             }));
 
             const { result: count, duration } = await measureTime(async () => {
-                return await TestUser.createMany(users, false, undefined, {
+                return await TestUser.createMany(users, { skipDuplicates: false,
                     parallel: capabilities.supportsParallel,
                     concurrency: capabilities.maxConcurrency
                 });
@@ -130,7 +130,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 { name: 'New User 2', email: 'new2@test.com', age: 35 }
             ];
 
-            const count = await TestUser.createMany(users, true, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: true,
                 parallel: capabilities.supportsParallel
             });
 
@@ -153,7 +153,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 age: 25
             }));
 
-            const createResult = await TestUser.upsertMany(initialUsers, undefined, {
+            const createResult = await TestUser.upsertMany(initialUsers, {
                 parallel: capabilities.supportsParallel,
                 concurrency: capabilities.maxConcurrency
             });
@@ -175,7 +175,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             ];
 
             const { result: upsertResult, duration } = await measureTime(async () => {
-                return await TestUser.upsertMany(upsertUsers, undefined, {
+                return await TestUser.upsertMany(upsertUsers, {
                     parallel: capabilities.supportsParallel,
                     concurrency: capabilities.maxConcurrency
                 });
@@ -207,7 +207,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 age: 30 // Changed age
             }));
 
-            const result = await TestUser.upsertMany(upsertUsers, undefined, {
+            const result = await TestUser.upsertMany(upsertUsers, {
                 parallel: capabilities.supportsParallel
             });
 
@@ -328,7 +328,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             }));
 
             // This should not exhaust the connection pool
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: capabilities.supportsParallel,
                 concurrency: getConnectionPoolSize()
             });
@@ -350,7 +350,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             }));
 
             // Should complete without transaction errors
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: capabilities.supportsParallel,
                 concurrency: capabilities.maxConcurrency
             });
@@ -392,9 +392,10 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             if (capabilities.supportsSkipDuplicates) {
                 const result = await TestUser.createMany(
                     [...users.slice(0, 10), ...users.slice(25, 50)],
-                    true, // skipDuplicates
-                    undefined,
-                    { parallel: capabilities.supportsParallel }
+                    { 
+                        skipDuplicates: true,
+                        parallel: capabilities.supportsParallel 
+                    }
                 );
 
                 // Should create the non-duplicate ones
@@ -403,9 +404,10 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 // For databases that don't support skipDuplicates, just verify creation works
                 const result = await TestUser.createMany(
                     users.slice(25, 50),
-                    false,
-                    undefined,
-                    { parallel: capabilities.supportsParallel }
+                    { 
+                        skipDuplicates: false,
+                        parallel: capabilities.supportsParallel 
+                    }
                 );
 
                 expect(result).toBe(25);
@@ -425,7 +427,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             ];
 
             // Should create all valid users
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: capabilities.supportsParallel
             });
 
@@ -442,10 +444,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             if (capabilities.supportsSkipDuplicates) {
                 // With skipDuplicates, should not throw
                 const count = await TestUser.createMany(
-                    [{ name: 'Duplicate', email: 'duplicate@test.com', age: 30 }],
-                    true,
-                    undefined,
-                    { parallel: capabilities.supportsParallel }
+                    [{ name: 'Duplicate', email: 'duplicate@test.com', age: 30 }], { skipDuplicates: true, parallel: capabilities.supportsParallel }
                 );
                 expect(count).toBe(0);
             } else {
@@ -453,10 +452,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 // SQLite and MongoDB handle this differently
                 try {
                     const count = await TestUser.createMany(
-                        [{ name: 'Duplicate', email: 'duplicate@test.com', age: 30 }],
-                        false,
-                        undefined,
-                        { parallel: capabilities.supportsParallel }
+                        [{ name: 'Duplicate', email: 'duplicate@test.com', age: 30 }], { skipDuplicates: false, parallel: capabilities.supportsParallel }
                     );
                     // If it doesn't throw, it should return 0
                     expect(count).toBe(0);
@@ -473,9 +469,10 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             try {
                 const count = await TestUser.createMany(
                     [{ name: 'Invalid User' } as any], // Missing email
-                    false,
-                    undefined,
-                    { parallel: capabilities.supportsParallel }
+                    { 
+                        skipDuplicates: false,
+                        parallel: capabilities.supportsParallel 
+                    }
                 );
                 // If it doesn't throw, it should return 0
                 expect(count).toBe(0);
@@ -491,7 +488,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             const users = [{ name: 'Test', email: 'test@test.com', age: 25 }];
             
             // Should complete successfully with valid connection
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: capabilities.supportsParallel
             });
             
@@ -503,9 +500,10 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 // Try to create with invalid data
                 await TestUser.createMany(
                     [{ name: 'Test' } as any], // Missing required email
-                    false,
-                    undefined,
-                    { parallel: capabilities.supportsParallel }
+                    { 
+                        skipDuplicates: false,
+                        parallel: capabilities.supportsParallel 
+                    }
                 );
                 fail('Should have thrown an error');
             } catch (error: any) {
@@ -527,7 +525,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             }));
 
             const { result: count, duration } = await measureTime(async () => {
-                return await TestUser.createMany(users, false, undefined, {
+                return await TestUser.createMany(users, { skipDuplicates: false,
                     parallel: capabilities.supportsParallel,
                     concurrency: capabilities.maxConcurrency
                 });
@@ -565,7 +563,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 }));
 
                 const { result: count, duration } = await measureTime(async () => {
-                    return await TestUser.createMany(users, false, undefined, {
+                    return await TestUser.createMany(users, { skipDuplicates: false,
                         parallel: capabilities.supportsParallel,
                         concurrency: capabilities.maxConcurrency
                     });
@@ -599,7 +597,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             }));
 
             const { result: count, duration } = await measureTime(async () => {
-                return await TestUser.createMany(users, false, undefined, {
+                return await TestUser.createMany(users, { skipDuplicates: false,
                     parallel: true,
                     concurrency: capabilities.maxConcurrency
                 });
@@ -617,7 +615,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
 
     describe('Edge Cases', () => {
         it('should handle empty arrays', async () => {
-            const count = await TestUser.createMany([], false, undefined, {
+            const count = await TestUser.createMany([], { skipDuplicates: false,
                 parallel: capabilities.supportsParallel
             });
             expect(count).toBe(0);
@@ -628,7 +626,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 name: 'Single User',
                 email: 'single@test.com',
                 age: 25
-            }], false, undefined, {
+            }], { skipDuplicates: false,
                 parallel: capabilities.supportsParallel
             });
             expect(count).toBe(1);
@@ -642,7 +640,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 age: 25
             }));
 
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: capabilities.supportsParallel,
                 concurrency: capabilities.maxConcurrency
             });
@@ -657,7 +655,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 { name: 'Back\\slash', email: 'backslash@test.com', age: 35 }
             ];
 
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: capabilities.supportsParallel
             });
 
@@ -679,7 +677,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 { name: 'User 3', email: 'user3@test.com' } // age omitted
             ];
 
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: capabilities.supportsParallel
             });
 
@@ -694,7 +692,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 { name: longName, email: 'longname@test.com', age: 25 }
             ];
 
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: capabilities.supportsParallel
             });
 
@@ -735,7 +733,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 { name: 'Empty Name', email: 'empty@test.com', age: 25 }
             ];
 
-            const count = await TestUser.createMany(users, false, undefined, {
+            const count = await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: capabilities.supportsParallel
             });
 
@@ -787,7 +785,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 age: 25
             }));
 
-            await TestUser.createMany(users, false, undefined, {
+            await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: capabilities.supportsParallel,
                 concurrency: capabilities.maxConcurrency
             });
@@ -846,7 +844,7 @@ describe('MySQL-specific Operations', () => {
         }));
 
         const { result: count, duration } = await measureTime(async () => {
-            return await TestUser.createMany(users, false, undefined, {
+            return await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: true,
                 concurrency: capabilities.maxConcurrency
             });
@@ -909,7 +907,7 @@ describe('PostgreSQL-specific Operations', () => {
         }));
 
         const { result: count, duration } = await measureTime(async () => {
-            return await TestUser.createMany(users, false, undefined, {
+            return await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: true,
                 concurrency: capabilities.maxConcurrency
             });
@@ -978,7 +976,7 @@ describe('MongoDB-specific Operations', () => {
         }));
 
         const { result: count, duration } = await measureTime(async () => {
-            return await TestUser.createMany(users, false, undefined, {
+            return await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: true,
                 concurrency: capabilities.maxConcurrency
             });
@@ -1070,7 +1068,7 @@ describe('SQLite-specific Operations', () => {
         }));
 
         const { result: count, duration } = await measureTime(async () => {
-            return await TestUser.createMany(users, false, undefined, {
+            return await TestUser.createMany(users, { skipDuplicates: false,
                 parallel: false // Explicitly sequential
             });
         });

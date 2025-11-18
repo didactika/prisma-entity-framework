@@ -308,7 +308,8 @@ describe('BaseEntity with Many-to-Many Relations', () => {
                 }
             ];
 
-            const count = await User.createMany(items, false, undefined, {
+            const count = await User.createMany(items, {
+                skipDuplicates: false,
                 handleRelations: true,
                 parallel: false
             });
@@ -329,7 +330,8 @@ describe('BaseEntity with Many-to-Many Relations', () => {
                 }
             ];
 
-            const count = await User.createMany(items, false, undefined, {
+            const count = await User.createMany(items, {
+                skipDuplicates: false,
                 handleRelations: true
             });
 
@@ -348,7 +350,8 @@ describe('BaseEntity with Many-to-Many Relations', () => {
                 }
             ];
 
-            const count = await User.createMany(items, false, undefined, {
+            const count = await User.createMany(items, {
+                skipDuplicates: false,
                 handleRelations: false
             });
 

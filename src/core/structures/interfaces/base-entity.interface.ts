@@ -2,8 +2,7 @@
  * Represents a base entity with generic CRUD operations.
  * @template TModel - The type of the data model.
  */
-export interface IBaseEntity<TModel> {
-    /**
+export interface IBaseEntity<TModel extends Record<string, unknown> = Record<string, unknown>> {    /**
      * Unique identifier of the entity (optional).
      * Can be a number (for SQL databases) or string (for MongoDB ObjectId).
      */
@@ -19,7 +18,7 @@ export interface IBaseEntity<TModel> {
      * Updates the entity in the database.
      * @returns A promise that resolves with the updated entity or `null` if the update fails.
      */
-    update(): Promise<TModel | null>;
+    update(): Promise<TModel>;
 
     /**
      * Deletes the entity from the database.
