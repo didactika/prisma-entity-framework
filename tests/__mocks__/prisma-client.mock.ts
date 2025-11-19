@@ -3,6 +3,8 @@
  * Provides mock implementations of Prisma models and operations
  */
 
+import { EntityPrismaModel } from "../../src/core/structures/interfaces/entity.interface";
+
 /**
  * Mock User model data
  */
@@ -179,7 +181,7 @@ export const mockRuntimeDataModel = {
 export function createMockModel(data: any[], modelName: string = 'Model') {
   let dataset = [...data];
 
-  const mockModel = {
+  const mockModel : EntityPrismaModel<any> = {
     name: modelName,
     
     findMany: jest.fn().mockImplementation(async (args?: any) => {
@@ -260,6 +262,13 @@ export function createMockModel(data: any[], modelName: string = 'Model') {
       return result.length > 0 ? result[0] : null;
     }),
 
+    findUnique: jest.fn().mockImplementation(async (args: any) => {
+      const item = dataset.find((item) => {
+        return Object.entries(args.where).every(([key, value]) => item[key] === value);
+      });
+      return item || null;
+    }),
+
     count: jest.fn().mockImplementation(async (args?: any) => {
       if (!args?.where) return dataset.length;
 
@@ -308,6 +317,57 @@ export function createMockModel(data: any[], modelName: string = 'Model') {
       };
 
       return dataset[index];
+    }),
+
+    updateMany: jest.fn().mockImplementation(async (args: any) => {
+      let count = 0;
+      
+      dataset = dataset.map((item) => {
+        const matches = Object.entries(args.where).every(([key, value]: [string, any]) => {
+          if (value && typeof value === 'object' && 'equals' in value) {
+            return item[key] === value.equals;
+          }
+          return item[key] === value;
+        });
+
+        if (matches) {
+          count++;
+          return {
+            ...item,
+            ...args.data,
+            updatedAt: new Date(),
+          };
+        }
+        return item;
+      });
+
+      return { count };
+    }),
+
+    upsert: jest.fn().mockImplementation(async (args: any) => {
+      const index = dataset.findIndex((item) => {
+        return Object.entries(args.where).every(([key, value]) => item[key] === value);
+      });
+
+      if (index !== -1) {
+        // Update existing
+        dataset[index] = {
+          ...dataset[index],
+          ...args.update,
+          updatedAt: new Date(),
+        };
+        return dataset[index];
+      } else {
+        // Create new
+        const newItem = {
+          id: dataset.length + 1,
+          ...args.create,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        dataset.push(newItem);
+        return newItem;
+      }
     }),
 
     delete: jest.fn().mockImplementation(async (args: any) => {
@@ -362,9 +422,9 @@ export function createMockPrismaClient() {
     $connect: jest.fn().mockResolvedValue(undefined),
     $disconnect: jest.fn().mockResolvedValue(undefined),
     _reset: () => {
-      mockUser._reset();
-      mockPost._reset();
-      mockComment._reset();
+      (mockUser as any)._reset();
+      (mockPost as any)._reset();
+      (mockComment as any)._reset();
     },
   };
 }

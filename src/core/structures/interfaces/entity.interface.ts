@@ -1,4 +1,4 @@
-export interface EntityPrismaModel<T extends Record<string, unknown>> {
+export interface EntityPrismaModel<T extends object = Record<string, unknown>> {
     name: string;
     $parent?: unknown;
 
@@ -62,4 +62,6 @@ export interface EntityPrismaModel<T extends Record<string, unknown>> {
         update: Record<string, unknown>;
         include?: Record<string, unknown>;
     }): Promise<T & { id: number | string }>;
+
+    [key: string]: unknown;
 }

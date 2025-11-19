@@ -33,17 +33,15 @@ export default class BaseEntityQuery {
      * Supports relation includes, complex searches, and automatic chunking for large list searches (>10k items).
      * Automatically optimizes queries with large OR conditions using batching.
      */
-    public static async findByFilter<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        entityModel: EntityPrismaModel<T>,
+    public static async findByFilter<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
         getModelInformation: () => ModelInfo,
-        filter: Partial<T>,
+        filter: Partial<TModel>,
         options: FindByFilterOptions.Options = FindByFilterOptions.defaultOptions
     ): Promise<
-        | FindByFilterOptions.PaginatedResponse<T>
-        | T[]
-        | T
+        | FindByFilterOptions.PaginatedResponse<TModel>
+        | TModel[]
+        | TModel
         | null
     > {
         if (!entityModel) throw new Error("The model is not defined in the BaseEntity class.");
@@ -97,7 +95,7 @@ export default class BaseEntityQuery {
             const whereKeys = Object.keys(whereClause);
             const hasOnlyOr = whereKeys.length === 1 && whereKeys[0] === "OR";
 
-            let data: T[];
+            let data: TModel[];
             let total = 0;
 
             if (
@@ -105,7 +103,7 @@ export default class BaseEntityQuery {
                 Array.isArray((whereClause as any).OR) &&
                 (whereClause as any).OR.length > 0
             ) {
-                data = (await executeWithOrBatching<T & { id: unknown }>(
+                data = (await executeWithOrBatching<TModel & { id: unknown }>(
                     entityModel,
                     (whereClause as any).OR,
                     {
@@ -113,7 +111,7 @@ export default class BaseEntityQuery {
                         parallel: options.parallel,
                         concurrency: options.concurrency
                     }
-                )) as T[];
+                )) as TModel[];
 
                 const sorted = BaseEntityQuery.sortResults(data, orderBy);
 
@@ -152,7 +150,7 @@ export default class BaseEntityQuery {
                     page,
                     pageSize,
                     data
-                } as FindByFilterOptions.PaginatedResponse<T>;
+                } as FindByFilterOptions.PaginatedResponse<TModel>;
             }
 
             return data;
@@ -166,7 +164,7 @@ export default class BaseEntityQuery {
             const useParallel =
                 options.parallel !== false && isParallelEnabled() && chunks.length > 1;
 
-            let allResults: T[][];
+            let allResults: TModel[][];
 
             if (useParallel) {
                 const operations = chunks.map(chunkValues => () => {
@@ -188,7 +186,7 @@ export default class BaseEntityQuery {
                     rateLimit: options.rateLimit
                 });
 
-                allResults = result.results as T[][];
+                allResults = result.results as TModel[][];
 
                 if (result.errors.length > 0) {
                     logError(
@@ -212,13 +210,13 @@ export default class BaseEntityQuery {
                     return entityModel.findMany({ where: whereClause, include });
                 });
 
-                allResults = (await Promise.all(queryPromises)) as T[][];
+                allResults = (await Promise.all(queryPromises)) as TModel[][];
             }
 
-            const flattened = ([] as T[]).concat(...allResults);
+            const flattened = ([] as TModel[]).concat(...allResults);
             const deduplicated = deduplicateResults(
-                flattened as (T & { id: unknown })[]
-            ) as T[];
+                flattened as (TModel & { id: unknown })[]
+            ) as TModel[];
 
             const orderBy = options.orderBy as Record<string, "asc" | "desc"> | undefined;
             const finalResults = BaseEntityQuery.sortResults(deduplicated, orderBy);
@@ -238,12 +236,10 @@ export default class BaseEntityQuery {
      * @param filter - Filter criteria
      * @returns Promise<number> - The count of matching records
      */
-    public static async countByFilter<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        entityModel: EntityPrismaModel<T>,
+    public static async countByFilter<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
         getModelInformation: () => ModelInfo,
-        filter: Partial<T>
+        filter: Partial<TModel>
     ): Promise<number> {
         if (!entityModel) throw new Error("The model is not defined in the BaseEntity class.");
 
@@ -274,12 +270,10 @@ export default class BaseEntityQuery {
      * @param options - Query options (search)
      * @returns Promise<number> - The number of deleted records
      */
-    public static async deleteByFilter<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        entityModel: EntityPrismaModel<T>,
+    public static async deleteByFilter<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
         getModelInformation: () => ModelInfo,
-        filter: Partial<T>,
+        filter: Partial<TModel>,
         options?: FindByFilterOptions.Options
     ): Promise<number> {
         if (!entityModel) throw new Error("The model is not defined in the BaseEntity class.");
@@ -316,10 +310,10 @@ export default class BaseEntityQuery {
         }
     }
 
-    private static sortResults<T extends Record<string, unknown>>(
-        data: T[],
+    private static sortResults<TModel extends object>(
+        data: TModel[],
         orderBy?: Record<string, "asc" | "desc">
-    ): T[] {
+    ): TModel[] {
         if (!orderBy) return data;
 
         const [orderByKey, orderByDirection] = Object.entries(orderBy)[0] as [
@@ -328,8 +322,8 @@ export default class BaseEntityQuery {
         ];
 
         return [...data].sort((a, b) => {
-            const aVal = a[orderByKey] as unknown;
-            const bVal = b[orderByKey] as unknown;
+            const aVal = (a as Record<string, unknown>)[orderByKey] as unknown;
+            const bVal = (b as Record<string, unknown>)[orderByKey] as unknown;
 
             if (aVal == null && bVal == null) return 0;
             if (aVal == null) return orderByDirection === "asc" ? -1 : 1;

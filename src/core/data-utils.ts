@@ -297,7 +297,7 @@ export default class DataUtils {
      * // relationTypes: Map { 'roles' => 'implicit' }
      * ```
      */
-    public static extractManyToManyRelations<T extends Record<string, unknown>>(
+    public static extractManyToManyRelations<T extends object>(
         items: T[],
         modelInfo?: PrismaModelInfo | unknown
     ): {
@@ -333,11 +333,12 @@ export default class DataUtils {
         const cleanedItems = items.map((item, index) => {
             const cleaned = { ...item };
             const itemRelations: Record<string, unknown[]> = {};
+            const itemRecord = item as Record<string, unknown>;
 
             for (const field of manyToManyFields) {
                 const fieldName = field.name;
                 if (fieldName in item) {
-                    const value = item[fieldName];
+                    const value = itemRecord[fieldName];
 
                     // Extract relation data using validation-utils
                     if (isNonEmptyArray(value)) {
@@ -351,7 +352,7 @@ export default class DataUtils {
                     }
 
                     // Remove from main item
-                    delete cleaned[fieldName];
+                    delete (cleaned as Record<string, unknown>)[fieldName];
                 }
             }
 

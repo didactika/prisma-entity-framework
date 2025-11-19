@@ -6,9 +6,17 @@ import { configurePrisma } from '../src/core/config';
 const mockPrismaClient = {
     user: {
         name: 'User',
-        createMany: jest.fn(),
         findMany: jest.fn(),
+        findFirst: jest.fn(),
+        findUnique: jest.fn(),
+        count: jest.fn(),
+        create: jest.fn(),
+        createMany: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
+        upsert: jest.fn(),
+        delete: jest.fn(),
+        deleteMany: jest.fn(),
     },
     _runtimeDataModel: {
         models: {

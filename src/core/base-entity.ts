@@ -9,13 +9,13 @@ import BaseEntityQuery from "./base-entity-query";
 import BaseEntityHelpers from "./base-entity-helpers";
 import { EntityPrismaModel } from "./structures/interfaces/entity.interface";
 
-interface BaseEntityCtor<TModel extends Record<string, unknown>> {
+interface BaseEntityCtor<TModel extends object> {
     new(...args: any[]): BaseEntity<TModel>;
     model: EntityPrismaModel<TModel>;
     getModelInformation(): ReturnType<typeof ModelUtils.getModelInformationCached>;
 }
 
-interface BaseEntityBatchCtor<TModel extends Record<string, unknown>>
+interface BaseEntityBatchCtor<TModel extends object>
     extends BaseEntityCtor<TModel> {
     updateManyById(
         dataList: Array<Partial<TModel>>,
@@ -24,7 +24,7 @@ interface BaseEntityBatchCtor<TModel extends Record<string, unknown>>
 }
 
 export default abstract class BaseEntity<
-    TModel extends Record<string, unknown> = Record<string, unknown>
+    TModel extends object = object
 > implements IBaseEntity<TModel> {
     static readonly model: unknown;
     public readonly id?: number | string;
@@ -113,17 +113,15 @@ export default abstract class BaseEntity<
      * );
      * ```
      */
-    public static async findByFilter<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        this: BaseEntityCtor<T>,
-        filter: Partial<T>,
+    public static async findByFilter<TModel extends object>(
+        this: BaseEntityCtor<TModel>,
+        filter: Partial<TModel>,
         options: FindByFilterOptions.Options = FindByFilterOptions.defaultOptions
-    ): Promise<FindByFilterOptions.PaginatedResponse<T> | T[] | T | null> {
+    ): Promise<FindByFilterOptions.PaginatedResponse<TModel> | TModel[] | TModel | null> {
         const entityModel = this.model;
         const getModelInformation = () => this.getModelInformation();
 
-        return BaseEntityQuery.findByFilter<T>(
+        return BaseEntityQuery.findByFilter<TModel>(
             entityModel,
             getModelInformation,
             filter,
@@ -136,16 +134,14 @@ export default abstract class BaseEntity<
      * @param filter - Filter criteria
      * @returns Promise<number> - The count of matching records
      */
-    public static async countByFilter<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        this: BaseEntityCtor<T>,
-        filter: Partial<T>
+    public static async countByFilter<TModel extends object>(
+        this: BaseEntityCtor<TModel>,
+        filter: Partial<TModel>
     ): Promise<number> {
         const entityModel = this.model;
         const getModelInformation = () => this.getModelInformation();
 
-        return BaseEntityQuery.countByFilter<T>(
+        return BaseEntityQuery.countByFilter<TModel>(
             entityModel,
             getModelInformation,
             filter
@@ -267,11 +263,9 @@ export default abstract class BaseEntity<
         return created;
     }
 
-    public static async createMany<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        this: BaseEntityCtor<T>,
-        items: Partial<T>[],
+    public static async createMany<TModel extends object>(
+        this: BaseEntityCtor<TModel>,
+        items: Partial<TModel>[],
         options?: {
             skipDuplicates?: boolean;
             keyTransformTemplate?: (relationName: string) => string;
@@ -283,7 +277,7 @@ export default abstract class BaseEntity<
         const entityModel = this.model;
         const getModelInformation = () => this.getModelInformation();
 
-        return BaseEntityBatch.createMany<T>(
+        return BaseEntityBatch.createMany<TModel>(
             entityModel,
             getModelInformation,
             items,
@@ -307,15 +301,13 @@ export default abstract class BaseEntity<
      * // If user doesn't exist -> create
      * ```
      */
-    public static async upsert<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        this: BaseEntityCtor<T>,
-        data: Partial<T>,
+    public static async upsert<TModel extends object>(
+        this: BaseEntityCtor<TModel>,
+        data: Partial<TModel>,
         options?: {
             keyTransformTemplate?: (relationName: string) => string;
         }
-    ): Promise<T> {
+    ): Promise<TModel> {
         const entityModel = this.model;
 
         // Type guard: check if model has required methods
@@ -323,7 +315,7 @@ export default abstract class BaseEntity<
             throw new Error("Model is not defined in the BaseEntity class.");
         }
 
-        const typedModel = entityModel as EntityPrismaModel<T>;
+        const typedModel = entityModel as EntityPrismaModel<TModel>;
 
         if (
             typeof typedModel.name !== "string" ||
@@ -362,7 +354,7 @@ export default abstract class BaseEntity<
         const normalized = DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
 
         // Try to find existing record using unique constraints
-        const existingRecord = await BaseEntity.findExistingByUniqueConstraints<T>(
+        const existingRecord = await BaseEntity.findExistingByUniqueConstraints<TModel>(
             typedModel,
             normalized,
             uniqueConstraints
@@ -377,7 +369,7 @@ export default abstract class BaseEntity<
 
             if (!hasChanges) {
                 // No changes, return existing record
-                return existingRecord as T;
+                return existingRecord as TModel;
             }
 
             // Type guard: ensure existingRecord has valid id
@@ -392,7 +384,7 @@ export default abstract class BaseEntity<
                 where: { id: recordId },
                 data: normalized
             });
-            return updated as T;
+            return updated as TModel;
         }
 
         // Record doesn't exist, create new
@@ -406,13 +398,11 @@ export default abstract class BaseEntity<
      * 
      * @private
      */
-    private static async findExistingByUniqueConstraints<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        entityModel: EntityPrismaModel<T>,
+    private static async findExistingByUniqueConstraints<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
         normalized: Record<string, unknown>,
         uniqueConstraints: string[][]
-    ): Promise<T | null> {
+    ): Promise<TModel | null> {
         for (const constraint of uniqueConstraints) {
             const whereClause: Record<string, unknown> = {};
             let hasAllFields = true;
@@ -442,7 +432,7 @@ export default abstract class BaseEntity<
                             typeof record.id === "number" ||
                             typeof record.id === "string"
                         ) {
-                            return existingRecord as T;
+                            return existingRecord as TModel;
                         }
                     }
                 } catch {
@@ -478,11 +468,9 @@ export default abstract class BaseEntity<
      * // Returns: { created: 1, updated: 1, unchanged: 0, total: 2 }
      * ```
      */
-    public static async upsertMany<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        this: BaseEntityBatchCtor<T>,
-        items: Partial<T>[],
+    public static async upsertMany<TModel extends object>(
+        this: BaseEntityBatchCtor<TModel>,
+        items: Partial<TModel>[],
         options?: {
             keyTransformTemplate?: (relationName: string) => string;
             parallel?: boolean;
@@ -493,11 +481,11 @@ export default abstract class BaseEntity<
         const entityModel = this.model;
         const getModelInformation = () => this.getModelInformation();
         const updateManyByIdFn = (
-            dataList: Array<Partial<T>>,
+            dataList: Array<Partial<TModel>>,
             opts?: { parallel?: boolean; concurrency?: number }
         ) => this.updateManyById(dataList, opts);
 
-        return BaseEntityBatch.upsertMany<T>(
+        return BaseEntityBatch.upsertMany<TModel>(
             entityModel,
             getModelInformation,
             updateManyByIdFn,
@@ -523,11 +511,9 @@ export default abstract class BaseEntity<
      * ); // true
      * ```
      */
-    protected static hasChanges<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        newData: T,
-        existingData: T,
+    protected static hasChanges<TModel extends object>(
+        newData: TModel,
+        existingData: TModel,
         ignoreFields: string[] = []
     ): boolean {
         // Delegate to comparison-utils for consistent change detection
@@ -594,11 +580,9 @@ export default abstract class BaseEntity<
         return updatedEntity;
     }
 
-    public static async updateManyById<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        this: BaseEntityCtor<T>,
-        dataList: Array<Partial<T>>,
+    public static async updateManyById<TModel extends object>(
+        this: BaseEntityCtor<TModel>,
+        dataList: Array<Partial<TModel>>,
         options?: {
             parallel?: boolean;
             concurrency?: number;
@@ -659,17 +643,15 @@ export default abstract class BaseEntity<
         }
     }
 
-    public static async deleteByFilter<
-        T extends Record<string, unknown> = Record<string, unknown>
-    >(
-        this: BaseEntityCtor<T>,
-        filter: Partial<T>,
+    public static async deleteByFilter<TModel extends object>(
+        this: BaseEntityCtor<TModel>,
+        filter: Partial<TModel>,
         options?: FindByFilterOptions.Options
     ): Promise<number> {
         const entityModel = this.model;
         const getModelInformation = () => this.getModelInformation();
 
-        return BaseEntityQuery.deleteByFilter<T>(
+        return BaseEntityQuery.deleteByFilter<TModel>(
             entityModel,
             getModelInformation,
             filter,

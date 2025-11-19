@@ -28,11 +28,11 @@ interface IUser extends IBaseEntity {
 class User extends BaseEntity<IUser> implements IUser {
   static override readonly model = mockPrismaClient.user;
 
-  public declare readonly id?: number;
+  public declare readonly id: IUser['id'];
   private _name!: IUser['name'];
   private _email!: IUser['email'];
-  private _age: IUser['age'];
-  private _isActive: IUser['isActive'];
+  private _age!: IUser['age'];
+  private _isActive!: IUser['isActive'];
 
   constructor(data: Partial<IUser>) {
     super(data);
@@ -283,7 +283,7 @@ describe('BaseEntity', () => {
       ];
 
       // Mock the createMany to return proper format
-      mockPrismaClient.user.createMany.mockResolvedValueOnce({ count: 2 });
+      jest.spyOn(mockPrismaClient.user, 'createMany').mockResolvedValueOnce({ count: 2 });
 
       const result = await User.createMany(items);
       expect(mockPrismaClient.user.createMany).toHaveBeenCalled();

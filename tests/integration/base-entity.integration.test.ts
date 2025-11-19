@@ -81,7 +81,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
     // Log detected pool size for MongoDB
     if (db.provider === 'mongodb') {
-      const { getConnectionPoolSize } = require('../../src/config');
+      const { getConnectionPoolSize } = require('../../src/core/config');
       const poolSize = getConnectionPoolSize();
       console.log(`✅ Detected MongoDB connection pool size: ${poolSize}`);
 

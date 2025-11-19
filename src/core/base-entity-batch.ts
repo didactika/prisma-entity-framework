@@ -59,10 +59,10 @@ export default class BaseEntityBatch {
      * @param options - Batch operation options (skipDuplicates, keyTransformTemplate, parallel, concurrency, handleRelations)
      * @returns Promise<number> - Number of entities created
      */
-    public static async createMany<T extends Record<string, unknown> = Record<string, unknown>>(
-        entityModel: EntityPrismaModel<T>,
+    public static async createMany<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
         getModelInformation: () => ModelInfo,
-        items: Partial<T>[],
+        items: Partial<TModel>[],
         options?: {
             skipDuplicates?: boolean;
             keyTransformTemplate?: (relationName: string) => string;
@@ -95,12 +95,12 @@ export default class BaseEntityBatch {
             relations,
             relationTypes
         } = handleRelations
-            ? DataUtils.extractManyToManyRelations(items, modelInfo)
-            : {
-                  cleanedItems: items,
-                  relations: new Map<number, Record<string, unknown[]>>(),
-                  relationTypes: new Map<string, "explicit" | "implicit">()
-              };
+                ? DataUtils.extractManyToManyRelations(items, modelInfo)
+                : {
+                    cleanedItems: items,
+                    relations: new Map<number, Record<string, unknown[]>>(),
+                    relationTypes: new Map<string, "explicit" | "implicit">()
+                };
 
         const processedData = itemsToProcess.map(item => {
             const clean = BaseEntityHelpers.sanitizeKeysRecursive(item);
@@ -210,7 +210,7 @@ export default class BaseEntityBatch {
                             where: { OR: orConditions }
                         });
 
-                        const recordMap = new Map<string, T & { id: number | string }>();
+                        const recordMap = new Map<string, TModel & { id: number | string }>();
                         for (const record of createdRecords) {
                             for (const constraint of uniqueConstraints) {
                                 const keyParts: string[] = [];
@@ -320,14 +320,14 @@ export default class BaseEntityBatch {
      * @param options - Batch operation options (keyTransformTemplate, parallel, concurrency, handleRelations)
      * @returns Promise with created, updated, unchanged, and total counts
      */
-    public static async upsertMany<T extends Record<string, unknown> = Record<string, unknown>>(
-        entityModel: EntityPrismaModel<T>,
+    public static async upsertMany<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
         getModelInformation: () => ModelInfo,
         updateManyByIdFn: (
-            dataList: Array<Partial<T> & { id: number | string }>,
+            dataList: Array<Partial<TModel> & { id: number | string }>,
             options?: { parallel?: boolean; concurrency?: number }
         ) => Promise<number>,
-        items: Partial<T>[],
+        items: Partial<TModel>[],
         options?: {
             keyTransformTemplate?: (relationName: string) => string;
             parallel?: boolean;
@@ -364,12 +364,12 @@ export default class BaseEntityBatch {
             relations,
             relationTypes
         } = handleRelations
-            ? DataUtils.extractManyToManyRelations(items, modelInfo)
-            : {
-                  cleanedItems: items,
-                  relations: new Map<number, Record<string, unknown[]>>(),
-                  relationTypes: new Map<string, "explicit" | "implicit">()
-              };
+                ? DataUtils.extractManyToManyRelations(items, modelInfo)
+                : {
+                    cleanedItems: items,
+                    relations: new Map<number, Record<string, unknown[]>>(),
+                    relationTypes: new Map<string, "explicit" | "implicit">()
+                };
 
         const normalizedItems = itemsToProcess.map(item => {
             const clean = BaseEntityHelpers.sanitizeKeysRecursive(item);
@@ -410,11 +410,11 @@ export default class BaseEntityBatch {
             }
         }
 
-        let existingRecords: Array<T & { id: number | string }> = [];
+        let existingRecords: Array<TModel & { id: number | string }> = [];
         if (orConditions.length > 0) {
             try {
                 const fieldsPerCondition = uniqueConstraints[0]?.length || 1;
-                existingRecords = await executeWithOrBatching<T & { id: number | string }>(
+                existingRecords = await executeWithOrBatching<TModel & { id: number | string }>(
                     entityModel,
                     orConditions,
                     {
@@ -428,7 +428,7 @@ export default class BaseEntityBatch {
             }
         }
 
-        const existingMap = new Map<string, T & { id: number | string }>();
+        const existingMap = new Map<string, TModel & { id: number | string }>();
         for (const record of existingRecords) {
             for (const constraint of uniqueConstraints) {
                 const keyParts: string[] = new Array(constraint.length);
@@ -453,7 +453,7 @@ export default class BaseEntityBatch {
         for (let index = 0; index < normalizedItems.length; index++) {
             const normalized = normalizedItems[index];
             const constraints = itemConstraintMap.get(index);
-            let existingRecord: (T & { id: number | string }) | undefined;
+            let existingRecord: (TModel & { id: number | string }) | undefined;
 
             if (constraints) {
                 for (const constraint of constraints) {
@@ -540,8 +540,8 @@ export default class BaseEntityBatch {
                 operations.push(async () => {
                     return await withErrorHandling(
                         async () => {
-                            const updateData: Array<Partial<T> & { id: number | string }> =
-                                toUpdate.map(({ id, data }) => ({ id, ...(data as T) }));
+                            const updateData: Array<Partial<TModel> & { id: number | string }> =
+                                toUpdate.map(({ id, data }) => ({ id, ...(data as TModel) }));
                             return await updateManyByIdFn(updateData, { parallel: false });
                         },
                         "batch update",
@@ -620,8 +620,8 @@ export default class BaseEntityBatch {
             if (toUpdate.length > 0) {
                 updated = await withErrorHandling(
                     async () => {
-                        const updateData: Array<Partial<T> & { id: number | string }> =
-                            toUpdate.map(({ id, data }) => ({ id, ...(data as T) }));
+                        const updateData: Array<Partial<TModel> & { id: number | string }> =
+                            toUpdate.map(({ id, data }) => ({ id, ...(data as TModel) }));
                         return await updateManyByIdFn(updateData, { parallel: false });
                     },
                     "batch update",
@@ -786,8 +786,8 @@ export default class BaseEntityBatch {
      * @param options - Batch operation options (parallel, concurrency)
      * @returns Promise<number> - Number of entities updated
      */
-    public static async updateManyById(
-        entityModel: EntityPrismaModel<Record<string, unknown>>,
+    public static async updateManyById<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
         getModelInformation: () => ModelInfo,
         buildUpdateQueryFn: (
             batch: Array<Record<string, unknown>>,
@@ -873,9 +873,9 @@ export default class BaseEntityBatch {
      * 
      * @internal
      */
-    public static async updateManyByIdMongoDB(
+    public static async updateManyByIdMongoDB<TModel extends object>(
         formattedList: Array<Record<string, unknown>>,
-        entityModel: EntityPrismaModel<Record<string, unknown>>,
+        entityModel: EntityPrismaModel<TModel>,
         prisma: PrismaClient
     ): Promise<number> {
         let totalUpdated = 0;
@@ -942,8 +942,8 @@ export default class BaseEntityBatch {
      * @param options - Batch operation options (parallel, concurrency)
      * @returns Promise<number> - Number of entities deleted
      */
-    public static async deleteByIds(
-        entityModel: Pick<EntityPrismaModel<Record<string, unknown>>, "deleteMany">,
+    public static async deleteByIds<TModel extends object>(
+        entityModel: Pick<EntityPrismaModel<TModel>, "deleteMany">,
         ids: Array<number | string>,
         options?: {
             parallel?: boolean;
