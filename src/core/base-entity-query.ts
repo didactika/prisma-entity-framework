@@ -60,7 +60,7 @@ export default class BaseEntityQuery {
             if (options.relationsToInclude === "*" || isNonEmptyArray(options.relationsToInclude)) {
                 const prismaInstance = entityModel.$parent;
                 include = await ModelUtils.getIncludesTree(
-                    entityModel.name,
+                    entityModel.name!,
                     options.relationsToInclude,
                     0,
                     prismaInstance

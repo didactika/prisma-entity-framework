@@ -34,11 +34,12 @@ interface IUser {
   id?: number | string;
   name: string;
   email: string;
-  age?: number;
+  age?: number | null;
   isActive?: boolean;
 }
+
 class User extends BaseEntity<IUser> implements IUser {
-  static readonly model: any;
+  static override readonly model: PrismaClient['user'];
 
   public declare readonly id?: IUser['id'];
 

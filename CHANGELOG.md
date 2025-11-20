@@ -7,13 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2025-11-20
+
+### Fixed
+
+- **EntityPrismaModel**: Fixed type definition of prisma model interface to be more permissive and generic.
+
 ## [1.1.0] - 2025-11-20
 
 ### Changed
+
 - **IMPORTANT**: Removed `skipDuplicates` and other standalone parameters from `createMany` and `upsertMany` in favor of a unified `options` object.
-    - `createMany(items, skipDuplicates)` -> `createMany(items, { skipDuplicates })`
-    - `upsertMany(items, keyTransformTemplate)` -> `upsertMany(items, { keyTransformTemplate })`
-    - `updateManyById(dataList, parallel, concurrency)` -> `updateManyById(dataList, { parallel, concurrency })`
+  - `createMany(items, skipDuplicates)` -> `createMany(items, { skipDuplicates })`
+  - `upsertMany(items, keyTransformTemplate)` -> `upsertMany(items, { keyTransformTemplate })`
+  - `updateManyById(dataList, parallel, concurrency)` -> `updateManyById(dataList, { parallel, concurrency })`
 - **IMPORTANT**: The generic type constraint for entity operations has been changed from `Record<string, unknown>` to `object`. This supports a wider range of entity models (including class instances) but may break implementations relying on strict `Record` types. Consumers extending `BaseEntity` should update their generic constraints to `object` or `Record<string, any>`.
 - **Consolidated Batch Options**: Refactored batch operations (`createMany`, `upsert`, `upsertMany`, `updateManyById`) to use a consistent options object pattern. This improves API extensibility and readability.
 - **Generic Type Refactoring**: Relaxed generic type constraints from `Record<string, unknown>` to `object` (and renamed `T` to `TModel`) across `BaseEntity`, `BaseEntityBatch`, `BaseEntityQuery`, and `DataUtils`.
@@ -21,29 +28,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Documentation**: Updated API documentation to reflect the new options object pattern and provide detailed parameter descriptions.
 
 ### Added
+
 - **Test Infrastructure**: Updated `prisma-client.mock.ts` to include mock implementations for `findUnique`, `updateMany`, and `upsert` to support new test cases.
 
 ## [1.0.3] - 2025-10-30
+
 ### Fixed
+
 Added SqlServer in supported database providers list
 
 ## [1.0.2] - 2025-10-30
 
 ### Changed
+
 - **Optimized `executeInParallel()`**: Eliminated nested loops, reduced memory allocations, and removed redundant Promise wrappers faster parallel execution
 
 ## [1.0.1] - 2025-10-30
 
 ### Fixed
+
 - **Scalar Array Support**: Fixed `processRelations()` to preserve scalar arrays (String[], Int[], ObjectId[]) instead of wrapping them in `{ connect: [] }` - critical for MongoDB ObjectId arrays
 - **MySQL JSON Escaping**: Fixed JSON field corruption in raw SQL UPDATE queries by properly escaping backslashes for MySQL JSON fields
 - **Change Detection Performance**: Optimized `hasChanges()` with early exit and custom `deepEqual()`
 
 ### Changed
+
 - Removed hardcoded `siteUuid` from ignored fields in change detection - now only ignores standard fields (id, createdAt, updatedAt) with optional custom fields parameter
 - Refactored change detection methods for better readability: `isStandardIgnoredField()`, `normalizeValueForComparison()`, `deepEqualArrays()`, `deepEqualObjects()`
 
 ### Added
+
 - MySQL integration tests for JSON fields and special characters (`tests/integration/fields.mysql.test.ts`)
 - Scalar array unit tests covering String[], Int[], ObjectId arrays, and mixed types
 - Performance tests for optimized change detection
@@ -51,6 +65,7 @@ Added SqlServer in supported database providers list
 ## [1.0.0] - 2025-10-29
 
 ### Added
+
 - Parallel batch operations with automatic connection pool detection (2-6x performance improvement)
   - Pool size detection from `DATABASE_URL` parameters (`connection_limit`, `pool_size`, `maxPoolSize`)
   - MongoDB `maxPoolSize` parameter support for connection pool configuration
@@ -65,6 +80,7 @@ Added SqlServer in supported database providers list
 - Comprehensive documentation in `docs/parallel-batch-operations.md` and `docs/or-query-batching.md`
 
 ### Changed
+
 - All batch methods now support parallel execution with optional `parallel` and `concurrency` parameters
   - `createMany()`, `upsertMany()`, `updateManyById()`, `deleteByIds()` enhanced with parallel options
   - Automatic fallback to sequential execution for small datasets or single connections
@@ -78,8 +94,11 @@ Added SqlServer in supported database providers list
   - Database compatibility integration tests and performance benchmarks
 
 ## [0.1.14] - 2025-10-27
+
 ### Added
+
 - **MongoDB Support**: Full support for MongoDB databases
+
   - Added MongoDB provider to `DatabaseProvider` type
   - Created MongoDB Prisma schema (`tests/prisma/schema.mongodb.prisma`)
   - Added MongoDB Docker container configuration
@@ -104,13 +123,16 @@ Added SqlServer in supported database providers list
   - Comprehensive test suite for performance utilities (18 tests)
 
 ### Changed
+
 - **Flexible ID Types**: Updated `id` field to support both `number` and `string` types
+
   - `BaseEntity.id` is now `number | string | undefined`
   - `IBaseEntity.id` interface updated to support both types
   - `delete()` method return type changed to `number | string`
   - All database operations now handle both ID types correctly
 
 - **Optimized MongoDB Batch Operations**:
+
   - `updateManyById()` now uses Prisma transactions for MongoDB (atomic batch updates)
   - Added `MONGODB_TRANSACTION_BATCH_SIZE` constant (100 items per transaction)
   - Automatic fallback to individual updates if transaction fails
@@ -126,6 +148,7 @@ Added SqlServer in supported database providers list
 ## [0.1.13] - 2025-10-27
 
 ### Added
+
 - **JSON Field Support**: Full support for JSON/JSONB fields in all database operations
   - JSON fields are now preserved as-is without being wrapped in `connect`/`create` structures
   - Automatic detection of JSON fields using Prisma model metadata
@@ -135,7 +158,9 @@ Added SqlServer in supported database providers list
   - New `Product` model in test schemas with `metadata` and `settings` JSON fields
 
 ### Changed
+
 - **Optimized Batch Upsert Performance**: Major performance improvements in `upsertMany()`
+
   - Changed from N individual queries to 1 batch query using `findMany({ OR: [...] })`
   - Batch comparison of changes in memory instead of individual checks
   - Batch operations: `createMany` + `updateManyById` instead of N individual operations
@@ -144,6 +169,7 @@ Added SqlServer in supported database providers list
   - Only compares fields present in new data (ignores extra fields in existing records)
 
 - **Enhanced Data Processing**:
+
   - `DataUtils.processRelations()` now accepts optional `modelInfo` parameter
   - Detects JSON fields (`type: 'Json'` or `type: 'Bytes'`) and preserves them without relation processing
   - All entity methods now pass `modelInfo` to `processRelations()`: `create()`, `update()`, `createMany()`, `upsert()`, `upsertMany()`, `updateManyById()`
@@ -155,19 +181,21 @@ Added SqlServer in supported database providers list
   - Fixed table name resolution with multiple fallbacks: `dbName` → `name` → `model.name`
 
 ### Fixed
+
 - Fixed JSON fields being incorrectly filtered out in batch update operations
 - Fixed JSON objects being converted to `[object Object]` in SQL queries
 - Fixed `update()` method not passing `modelInfo` to `processRelations()` after merge
 
-
 ## [0.1.12] - 2025-10-20
 
 ### Fixed
+
 - **Update Method**: Fixed `update()` to correctly handle entities with both FK field and relation object
   - `DataUtils.normalizeRelationsToFK()` now preserves explicit FK values instead of overwriting with relation object ID
   - Added 8 new integration tests for update scenarios with relations
 
 ### Changed
+
 - Refactored `BaseEntity.pruneUpdatePayload()` for better maintainability
   - Split into helper methods: `shouldSkipField()`, `isEmptyObject()`, `hasPrismaOperations()`, `removeRelationObjectsWithFK()`
   - Improved filtering of Prisma operation objects (`connect`, `create`, `update`, etc.)
@@ -176,6 +204,7 @@ Added SqlServer in supported database providers list
 ## [0.1.11] - 2025-10-16
 
 ### Added
+
 - **Upsert Operations**: New `upsert()` and `upsertMany()` methods for smart create/update logic
   - Automatically detects existing records using unique constraints from Prisma schema
   - Only updates when actual changes are detected, avoiding unnecessary database writes
@@ -190,11 +219,13 @@ Added SqlServer in supported database providers list
 ## [0.1.10] - 2025-10-16
 
 ### Added
+
 - **Model-Aware Structure Building**: Enhanced `ObjectUtils` with Prisma relation awareness
   - New `buildWithRelations()` method constructs proper Prisma filter structures with `is`/`some` wrappers
   - Enhanced `assign()` method now accepts optional `modelInfo` parameter for relation-aware creation
 
 ### Fixed
+
 - **Search with Nested Array Relations**: Fixed search query generation for deeply nested array relations
   - Search paths like `posts.author.name` now correctly generate `{ posts: { some: { author: { is: { name: {...} } } } } }`
   - Previously generated invalid structure: `{ posts: { author: { name: {...} } } }` causing "Unknown argument" errors
@@ -203,6 +234,7 @@ Added SqlServer in supported database providers list
 - **Filter Merge with Nested Relations**: Fixed `ObjectUtils.assign()` to correctly merge filters when the same relation appears in both base filters and string search
 
 ### Changed
+
 - Updated `SearchBuilder.build()` and `apply()` to propagate `modelInfo` through the query building chain
 - Updated `BaseEntity.findByFilter()` to pass `modelInfo` to search filter operations
 - Enhanced `ObjectUtils.assign()` to create Prisma-compliant structures when modelInfo is provided
@@ -210,6 +242,7 @@ Added SqlServer in supported database providers list
 ## [0.1.9] - 2025-10-16
 
 ### Fixed
+
 - **Filter Merge with Nested Relations**: Fixed `ObjectUtils.assign()` to correctly merge filters when the same relation appears in both base filters and string search
   - Now properly navigates into existing `is`/`some` wrappers instead of overwriting them
   - Resolves "Unknown argument" errors when combining nested relation filters with search queries
@@ -218,12 +251,14 @@ Added SqlServer in supported database providers list
   - Added 3 new integration tests for real-world filter merge scenarios
 
 ### Changed
+
 - Enhanced `ObjectUtils.assign()` to detect and merge with Prisma filter structures (`is`, `some`)
 - Improved handling of complex nested queries with mixed filters and searches
 
 ## [0.1.8] - 2025-10-15
 
 ### Fixed
+
 - **Nested Relation Filters**: Fixed `applyDefaultFilters()` to correctly handle deeply nested relations at any level
   - Filters now properly propagate model information through all nesting levels
   - Array relations (`some`) and single relations (`is`) are correctly identified at any depth
@@ -231,12 +266,14 @@ Added SqlServer in supported database providers list
   - Added 3 new tests for deeply nested relation filtering
 
 ### Changed
+
 - Enhanced `SearchUtils.buildDefaultCondition()` to retrieve and pass correct model info for nested relations
 - Improved nested filter handling for complex relation structures (e.g., `group: { groupMembers: { userId: 81 } }`)
 
 ## [0.1.7] - 2025-10-14
 
 ### Added
+
 - **Wildcard Relation Includes**: Support for `"*"` in `relationsToInclude` to automatically include all first-level relations
   - Use `relationsToInclude: "*"` in `findByFilter()` to load all direct relations
   - Wildcard only includes first-level relations (no deep nesting)
@@ -244,39 +281,48 @@ Added SqlServer in supported database providers list
   - Added 6 new tests (3 unit + 3 integration) for wildcard functionality
 
 ### Changed
+
 - Updated `ModelUtils.getIncludesTree()` to handle `"*"` parameter for first-level relation expansion
 - Enhanced `BaseEntity.findByFilter()` to accept `"*"` string in addition to arrays for `relationsToInclude`
 
 ## [0.1.4] - 2025-10-14
 
 ### Fixed
+
 - Fixed `ModelUtils.getModelDependencyTree()` to include all relation fields, not just required ones
 
 ### Changed
+
 - Improved optional chaining in `BaseEntity.findByFilter()` for safer property access
 
 ## [0.1.3] - 2025-10-13
 
 ### Fixed
+
 - Fixed package.json entry points to match actual build output (`index.js`/`index.mjs`)
 
 ### Changed
+
 - Updated module exports to correctly point to CommonJS and ESM builds
 
 ## [0.1.2] - 2025-10-13
 
 ### Fixed
+
 - Fixed `@Property()` decorator not being exported in compiled CommonJS output
 - Removed unnecessary `emitDecoratorMetadata` from TypeScript configuration
 - Added `tsup.config.ts` for proper build configuration
 
 ### Changed
+
 - Improved build process to ensure all decorators are properly compiled and exported
 
 ## [0.1.1] - 2025-10-13
 
 ### Added
+
 - **Multi-Database Support**: Full support for MySQL, PostgreSQL, SQLite, and SQL Server
+
   - Automatic database provider detection from Prisma configuration
   - Database-specific SQL dialect handling (identifier quoting, boolean formatting)
   - New utility functions: `getDatabaseProvider()`, `getDatabaseDialect()`, `quoteIdentifier()`, `formatBoolean()`
@@ -286,8 +332,7 @@ Added SqlServer in supported database providers list
   - Automatically creates private properties with getters and setters
   - Simplifies entity field declarations
   - Full TypeScript support with type safety
-  
-- **Testing Infrastructure**: 
+- **Testing Infrastructure**:
   - Docker Compose configuration for MySQL (port 3311) and PostgreSQL (port 5433) testing
   - Separate Prisma schemas for each database provider
   - PowerShell scripts for automated multi-database testing
@@ -295,13 +340,13 @@ Added SqlServer in supported database providers list
     - `npm run test:mysql`
     - `npm run test:postgresql`
     - `npm run test:all-databases`
-    
 - **Documentation**:
   - Comprehensive Multi-Database Testing Guide
   - Examples demonstrating database-agnostic code
   - Updated README with database support and decorator information
 
 ### Changed
+
 - Updated `BaseEntity.buildUpdateQuery()` to use database-agnostic identifier quoting
 - Updated `BaseEntity.escapeValue()` to use database-specific boolean formatting
 - Updated `BaseEntity.createMany()` to handle database-specific features (e.g., `skipDuplicates` support)
@@ -311,6 +356,7 @@ Added SqlServer in supported database providers list
 ## [0.1.0] - 2025-10-09
 
 ### Added
+
 - Initial release with Active Record pattern
 - Fluent query builder with relation graphs
 - Batch operations and advanced CRUD
