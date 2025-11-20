@@ -181,9 +181,9 @@ export const mockRuntimeDataModel = {
 export function createMockModel(data: any[], modelName: string = 'Model') {
   let dataset = [...data];
 
-  const mockModel : EntityPrismaModel<any> = {
+  const mockModel: EntityPrismaModel<any> & { _reset: () => void } = {
     name: modelName,
-    
+
     findMany: jest.fn().mockImplementation(async (args?: any) => {
       let result = [...dataset];
 
@@ -321,7 +321,7 @@ export function createMockModel(data: any[], modelName: string = 'Model') {
 
     updateMany: jest.fn().mockImplementation(async (args: any) => {
       let count = 0;
-      
+
       dataset = dataset.map((item) => {
         const matches = Object.entries(args.where).every(([key, value]: [string, any]) => {
           if (value && typeof value === 'object' && 'equals' in value) {

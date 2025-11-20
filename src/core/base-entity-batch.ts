@@ -110,7 +110,7 @@ export default class BaseEntityBatch {
 
         const deduplicatedData = BaseEntityHelpers.deduplicateByUniqueConstraints(
             processedData,
-            entityModel.name
+            entityModel.name!
         );
 
         if (deduplicatedData.length < processedData.length) {
@@ -177,7 +177,7 @@ export default class BaseEntityBatch {
         }
 
         if (handleRelations && relations.size > 0 && totalCreated > 0) {
-            const uniqueConstraints = ModelUtils.getUniqueConstraints(entityModel.name);
+            const uniqueConstraints = ModelUtils.getUniqueConstraints(entityModel.name!);
 
             if (uniqueConstraints.length > 0) {
                 const orConditions = deduplicatedData
@@ -271,7 +271,7 @@ export default class BaseEntityBatch {
                             const relationResult = await DataUtils.applyManyToManyRelations(
                                 fetchedIds,
                                 relations,
-                                entityModel.name,
+                                entityModel.name!,
                                 modelInfo,
                                 relationTypes,
                                 {
@@ -341,7 +341,7 @@ export default class BaseEntityBatch {
         }
 
         const modelName = entityModel.name;
-        const uniqueConstraints = ModelUtils.getUniqueConstraints(modelName);
+        const uniqueConstraints = ModelUtils.getUniqueConstraints(modelName!);
 
         if (!uniqueConstraints || uniqueConstraints.length === 0) {
             throw new Error(
@@ -739,7 +739,7 @@ export default class BaseEntityBatch {
                     const relationResult = await DataUtils.applyManyToManyRelations(
                         allEntityIds,
                         remappedRelations,
-                        entityModel.name,
+                        entityModel.name!,
                         modelInfo,
                         relationTypes,
                         {
