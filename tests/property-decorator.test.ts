@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
-import BaseEntity from '../src/base-entity';
-import { Property } from '../src/decorators/property.decorator';
+import BaseEntity from '../src/core/base-entity';
+import { Property } from '../src/core/decorators/property.decorator';
 
 // Mock interface for testing
 interface ITestEntity {
@@ -15,7 +15,7 @@ interface ITestEntity {
 class TestEntityWithDecorator extends BaseEntity<ITestEntity> implements ITestEntity {
     static override readonly model = null; // Mock model for testing
 
-    public readonly id?: number;
+    public declare readonly id?: number;
     
     @Property() declare name: string;
     @Property() declare email: string;

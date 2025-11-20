@@ -49,6 +49,7 @@ model Product {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
   name        String
   sku         String   @unique
+  tags        Json?
   metadata    Json?
   settings    Json?
   createdAt   DateTime @default(now())

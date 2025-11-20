@@ -1,34 +1,53 @@
 /**
  * Integration test for BaseEntity with real Prisma database
- * Uses SQLite in-memory for fast and isolated testing
+ * 
+ * This test suite uses capability-based testing to ensure compatibility across all supported databases:
+ * - SQLite (default): Fast, file-based, sequential operations
+ * - MySQL: Relational, supports JSON, parallel operations
+ * - PostgreSQL: Relational, supports JSON and scalar arrays, parallel operations
+ * - MongoDB: Document-based, uses string IDs (ObjectId), limited transaction support
+ * 
+ * Tests automatically adapt based on detected database capabilities:
+ * - ID Type: number (auto-increment) vs string (ObjectId)
+ * - Skip Duplicates: Supported on MySQL/PostgreSQL, not on SQLite/MongoDB
+ * - Parallel Operations: Supported on all except SQLite
+ * 
+ * Run with specific database:
+ * - SQLite: npm test (default)
+ * - MySQL: DATABASE_URL=mysql://... npm test
+ * - PostgreSQL: DATABASE_URL=postgresql://... npm test
+ * - MongoDB: DATABASE_URL=mongodb://... npm test
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
-import BaseEntity from '../../src/base-entity';
-import { Property } from '../../src/decorators/property.decorator';
-import { configurePrisma, resetPrismaConfiguration } from '../../src/config';
-import { createTestDb } from '../utils/test-db';
+import BaseEntity from '../../src/core/base-entity';
+import { Property } from '../../src/core/decorators/property.decorator';
+import { configurePrisma, resetPrismaConfiguration } from '../../src/core/config';
+import { createTestDb } from '../helpers/test-db';
 import type { PrismaClient } from '@prisma/client';
 
 /**
  * User entity for testing using @Property() decorator
+ * ID type is flexible to support both numeric (SQLite, MySQL, PostgreSQL) and string (MongoDB) IDs
  */
 interface IUser {
-  id?: number;
+  id?: number | string;
   name: string;
   email: string;
   age?: number;
   isActive?: boolean;
 }
-class User extends BaseEntity<IUser> {
+class User extends BaseEntity<IUser> implements IUser {
   static readonly model: any;
 
-  @Property() declare name: string;
-  @Property() declare email: string;
-  @Property() declare age?: number;
-  @Property() declare isActive: boolean;
+  public declare readonly id?: IUser['id'];
 
-  constructor(data?: IUser) {
+  @Property() declare name: IUser['name'];
+  @Property() declare email: IUser['email'];
+  @Property() declare age: IUser['age'];
+  @Property() declare isActive: IUser['isActive'];
+
+  constructor(data?: Partial<IUser>) {
     super(data);
   }
 }
@@ -38,11 +57,20 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
   let prisma: PrismaClient;
 
   beforeAll(async () => {
-    // Setup real test database
+    // Setup real test database with capability detection
     db = await createTestDb();
     prisma = db.client;
 
-    console.log(`Running integration tests with ${db.provider}`);
+    // Log database provider and capabilities at test startup
+    console.log('\n' + '='.repeat(60));
+    console.log(`Running BaseEntity Integration Tests`);
+    console.log('='.repeat(60));
+    console.log(`Database Provider:     ${db.provider.toUpperCase()}`);
+    console.log(`ID Type:               ${db.capabilities.idType}`);
+    console.log(`Skip Duplicates:       ${db.capabilities.supportsSkipDuplicates ? '✅' : '❌'}`);
+    console.log(`Parallel Operations:   ${db.capabilities.supportsParallel ? '✅' : '❌'}`);
+    console.log(`Max Concurrency:       ${db.capabilities.maxConcurrency}`);
+    console.log('='.repeat(60) + '\n');
 
     // Clear all data before starting tests
     await db.clear();
@@ -53,10 +81,10 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
     // Log detected pool size for MongoDB
     if (db.provider === 'mongodb') {
-      const { getConnectionPoolSize } = require('../../src/config');
+      const { getConnectionPoolSize } = require('../../src/core/config');
       const poolSize = getConnectionPoolSize();
       console.log(`✅ Detected MongoDB connection pool size: ${poolSize}`);
-      
+
       if (process.env.DATABASE_URL?.includes('maxPoolSize')) {
         const match = process.env.DATABASE_URL.match(/maxPoolSize=(\d+)/);
         if (match) {
@@ -96,7 +124,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       expect(result.age).toBe(28);
 
       // Verify in database
-      const dbUser = await prisma.user.findUnique({ where: { id: result.id } });
+      const dbUser = await prisma.user.findUnique({ where: { id: result.id as any } });
       expect(dbUser).toBeDefined();
       expect(dbUser?.name).toBe('Alice');
     });
@@ -128,7 +156,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       expect(updated.email).toBe('updated@example.com');
 
       // Verify in database
-      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id as any } });
       expect(dbUser?.name).toBe('Updated');
     });
 
@@ -156,7 +184,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       // Find user with relations (simulating the bug scenario)
       const found = await User.findByFilter(
         { email: 'john@example.com' },
-        { 
+        {
           onlyOne: true,
           relationsToInclude: [{ posts: [] }]
         }
@@ -168,10 +196,10 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
       // Create entity instance from found data
       const userToUpdate = new User(found);
-      
+
       // Update a field
       userToUpdate.age = 31;
-      
+
       // This should work without errors
       const updated = await userToUpdate.update();
 
@@ -179,7 +207,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       expect(updated.name).toBe('John');
 
       // Verify in database
-      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id as any } });
       expect(dbUser?.age).toBe(31);
     });
 
@@ -206,7 +234,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       // Find user with posts relation
       const found = await User.findByFilter(
         { id: created.id },
-        { 
+        {
           onlyOne: true,
           relationsToInclude: [{ posts: [] }]
         }
@@ -230,7 +258,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       expect(updated.name).toBe('Jane Updated');
 
       // Verify in database
-      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id as any } });
       expect(dbUser?.name).toBe('Jane Updated');
     });
 
@@ -240,7 +268,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     it('should prefer FK field over relation object', async () => {
       // This test ensures that if both authorId and author exist,
       // the FK field is used and the relation object is removed
-      
+
       const user1 = await prisma.user.create({
         data: { name: 'Author 1', email: 'author1@example.com' }
       });
@@ -277,7 +305,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       // Mock entity class for Post
       class Post extends BaseEntity<any> {
         static readonly model = prisma.post;
-        
+
         declare title: string;
         declare content: string;
         declare published: boolean;
@@ -295,7 +323,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       expect(updated.authorId).toBe(user2.id);
 
       // Verify in database
-      const dbPost = await prisma.post.findUnique({ where: { id: createdPost.id } });
+      const dbPost = await prisma.post.findUnique({ where: { id: createdPost.id as any } });
       expect(dbPost?.authorId).toBe(user2.id);
       expect(dbPost?.title).toBe('Updated Post');
     });
@@ -322,7 +350,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       await userToUpdate.update();
 
       // Verify createdAt didn't change
-      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id as any } });
       expect((dbUser as any)?.createdAt.getTime()).toBe(originalCreatedAt.getTime());
       expect(dbUser?.name).toBe('Updated User');
     });
@@ -347,7 +375,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       await userToUpdate.update();
 
       // Verify updatedAt was updated by database
-      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id as any } });
       expect((dbUser as any)?.updatedAt.getTime()).toBeGreaterThanOrEqual(originalUpdatedAt.getTime());
       expect(dbUser?.name).toBe('Updated User');
     });
@@ -369,7 +397,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       };
 
       const userToUpdate = new User(userWithOperations);
-      
+
       // Should not fail with "Invalid invocation" error
       const updated = await userToUpdate.update();
 
@@ -389,7 +417,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       await userToDelete.delete();
 
       // Verify deleted from database
-      const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+      const dbUser = await prisma.user.findUnique({ where: { id: created.id as any } });
       expect(dbUser).toBeNull();
     });
   });
@@ -541,11 +569,11 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     });
 
     /**
-     * Test: should handle skipDuplicates
-     * SQLite does not support skipDuplicates parameter in createMany
-     * This test is conditional based on the database provider
+     * Test: should handle skipDuplicates with capability detection
+     * SQLite and MongoDB do not support skipDuplicates parameter in createMany
+     * This test adapts based on database capabilities
      */
-    it('should handle skipDuplicates or fail gracefully', async () => {
+    it('should handle skipDuplicates based on database capabilities', async () => {
       // Create initial user
       await prisma.user.create({ data: { name: 'Existing', email: 'exist@example.com' } });
 
@@ -554,24 +582,26 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         { name: 'Existing', email: 'exist@example.com' }, // Duplicate
       ];
 
-      if (db.supportsSkipDuplicates) {
+      if (db.capabilities.supportsSkipDuplicates) {
         // MySQL and PostgreSQL support skipDuplicates
-        const count = await User.createMany(users, true);
+        console.log(`✅ Testing skipDuplicates on ${db.provider} (supported)`);
+        const count = await User.createMany(users, { skipDuplicates: true });
         expect(count).toBeGreaterThanOrEqual(1);
 
         // Verify that only non-duplicate was created
         const allUsers = await prisma.user.findMany();
         expect(allUsers.length).toBe(2); // 1 existing + 1 new
       } else {
-        // SQLite doesn't support skipDuplicates
+        // SQLite and MongoDB don't support skipDuplicates
+        console.log(`⏭️  Skipping skipDuplicates test on ${db.provider} (not supported)`);
         // Should either throw an error or create only valid records
         try {
-          await User.createMany(users, true);
+          await User.createMany(users, { skipDuplicates: true });
           // If it succeeds, verify behavior
           const allUsers = await prisma.user.findMany();
           expect(allUsers.length).toBeGreaterThanOrEqual(1);
         } catch (error) {
-          // Expected for SQLite with duplicate email (unique constraint)
+          // Expected for databases without skipDuplicates support
           expect(error).toBeDefined();
         }
       }
@@ -654,7 +684,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
       expect(users.length).toBeGreaterThan(0);
       expect(users[0]).toHaveProperty('posts');
-      
+
       // Posts should be loaded, but their nested relations (author, comments) should not be automatically included
       if (users[0].posts.length > 0) {
         const post = users[0].posts[0];
@@ -681,13 +711,13 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       expect(users.length).toBeGreaterThan(0);
       expect(users[0]).toHaveProperty('posts');
       expect(users[0]).toHaveProperty('comments');
-      
+
       // Posts should have nested includes
       if (users[0].posts.length > 0) {
         expect(users[0].posts[0]).toHaveProperty('author');
         expect(users[0].posts[0]).toHaveProperty('comments');
       }
-      
+
       // Comments should be simple (no nesting)
       if (users[0].comments.length > 0) {
         expect(users[0].comments[0]).toHaveProperty('id');
@@ -699,16 +729,17 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
      * Test: should correctly merge filters with nested relations and string search
      */
     it('should correctly merge filters with nested relations and string search', async () => {
-      // Skip for MongoDB - uses hardcoded numeric IDs
-      if (db.provider === 'mongodb') {
+      // Skip for databases with string IDs - test uses hardcoded numeric IDs
+      if (db.capabilities.idType === 'string') {
+        console.log(`⏭️  Skipping test on ${db.provider} (uses string IDs, test requires numeric IDs)`);
         return;
       }
-      
+
       // This test simulates the real-world scenario where you have:
       // 1. A filter with nested relations (e.g., posts.comments.authorId)
       // 2. A string search on a nested field (e.g., posts.title)
       // The ObjectUtils.assign should merge them correctly into the 'is/some' structure
-      
+
       const users = await User.findByFilter(
         {
           posts: {
@@ -734,7 +765,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
       // Should not throw an error about unknown arguments
       expect(Array.isArray(users)).toBe(true);
-      
+
       // If results exist, they should have the correct structure
       if (users.length > 0) {
         expect(users[0]).toHaveProperty('posts');
@@ -750,16 +781,17 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
      * Test: should handle deeply nested filter with search on same relation
      */
     it('should handle deeply nested filter with search on same relation', async () => {
-      // Skip for MongoDB - uses hardcoded numeric IDs
-      if (db.provider === 'mongodb') {
+      // Skip for MongoDB - uses string IDs (ObjectId) instead of numeric IDs
+      if (db.capabilities.idType === 'string') {
+        console.log(`⏭️  Skipping test on ${db.provider} (uses string IDs, test requires numeric IDs)`);
         return;
       }
-      
+
       // Test case where both filter and search target the same nested relation
       // Filter: posts.authorId = 1
       // Search: posts.title LIKE 'First'
       // Both should merge into the same posts.is structure
-      
+
       const users = await User.findByFilter(
         {
           posts: {
@@ -780,8 +812,8 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       ) as any[];
 
       expect(Array.isArray(users)).toBe(true);
-      
-      // Should find user with id=1 who has posts
+
+      // Should find user with id=1 who has posts (only for numeric ID databases)
       if (users.length > 0) {
         expect(users[0].id).toBe(1);
       }
@@ -926,7 +958,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
       // Should not throw "Unknown argument `author`. Did you mean `every`?" error
       expect(Array.isArray(users)).toBe(true);
-      
+
       // If results exist, verify they match
       if (users.length > 0) {
         // Users should have posts with authors whose emails end with @example.com
@@ -1037,7 +1069,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
        */
       it('should create new user when doesn\'t exist', async () => {
         const userData = { name: 'New User', email: 'newuser@example.com', age: 25 };
-        
+
         const result = await User.upsert(userData);
 
         expect(result).toBeDefined();
@@ -1073,7 +1105,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         expect(result.age).toBe(35);
 
         // Verify in database
-        const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+        const dbUser = await prisma.user.findUnique({ where: { id: created.id as any } });
         expect(dbUser?.name).toBe('New Name');
         expect(dbUser?.age).toBe(35);
       });
@@ -1104,7 +1136,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         expect(result.age).toBe(28);
 
         // Verify no update occurred in database
-        const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+        const dbUser = await prisma.user.findUnique({ where: { id: created.id as any } });
         expect(dbUser?.updatedAt?.getTime()).toBe(createdUpdatedAt?.getTime());
       });
 
@@ -1128,7 +1160,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         expect(result.isActive).toBe(false);
 
         // Verify in database
-        const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+        const dbUser = await prisma.user.findUnique({ where: { id: created.id as any } });
         expect(dbUser?.isActive).toBe(false);
       });
 
@@ -1153,7 +1185,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         expect(result.isActive).toBe(true); // Should keep original value
 
         // Verify in database
-        const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+        const dbUser = await prisma.user.findUnique({ where: { id: created.id as any } });
         expect(dbUser?.name).toBe('Updated Name');
         expect(dbUser?.age).toBe(30);
         expect(dbUser?.isActive).toBe(true);
@@ -1315,7 +1347,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         });
 
         // Create large batch with mix of new and existing
-        const items = [];
+        const items: IUser[] = [];
         for (let i = 1; i <= 20; i++) {
           items.push({
             name: `User ${i}`,
@@ -1377,7 +1409,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         expect(result.id).toBe(created.id);
 
         // Verify age was preserved
-        const dbUser = await prisma.user.findUnique({ where: { id: created.id } });
+        const dbUser = await prisma.user.findUnique({ where: { id: created.id as any } });
         expect(dbUser?.age).toBe(30);
       });
 

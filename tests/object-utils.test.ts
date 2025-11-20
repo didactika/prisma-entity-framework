@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import ObjectUtils from '../src/search/object-utils';
+import ObjectUtils from '../src/core/object-utils';
 
 describe('ObjectUtils', () => {
   describe('assign', () => {

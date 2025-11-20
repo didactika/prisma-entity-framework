@@ -26,7 +26,7 @@ class BenchUser extends BaseEntity<IBenchUser> {
     @Property() declare email: string;
     @Property() declare age?: number;
 
-    constructor(data?: IBenchUser) {
+    constructor(data?: Partial<IBenchUser>) {
         super(data);
     }
 }
@@ -68,14 +68,14 @@ describeOrSkip('Parallel Operations - Performance Benchmarks', () => {
             configurePrisma(prisma, { maxConcurrency: 1, enableParallel: false });
             await db.clear();
             const seqStart = Date.now();
-            await BenchUser.createMany(users, false, undefined, { parallel: false });
+            await BenchUser.createMany(users, { skipDuplicates: false, parallel: false });
             const seqTime = Date.now() - seqStart;
 
             // Parallel (4 connections)
             configurePrisma(prisma, { maxConcurrency: 4, enableParallel: true });
             await db.clear();
             const parStart = Date.now();
-            await BenchUser.createMany(users, false, undefined, { parallel: true, concurrency: 4 });
+            await BenchUser.createMany(users, { skipDuplicates: false, parallel: true, concurrency: 4 });
             const parTime = Date.now() - parStart;
 
             const speedup = seqTime / parTime;
@@ -100,14 +100,14 @@ describeOrSkip('Parallel Operations - Performance Benchmarks', () => {
             configurePrisma(prisma, { maxConcurrency: 1, enableParallel: false });
             await db.clear();
             const seqStart = Date.now();
-            await BenchUser.createMany(users, false, undefined, { parallel: false });
+            await BenchUser.createMany(users, { skipDuplicates: false, parallel: false });
             const seqTime = Date.now() - seqStart;
 
             // Parallel (4 connections)
             configurePrisma(prisma, { maxConcurrency: 4, enableParallel: true });
             await db.clear();
             const parStart = Date.now();
-            await BenchUser.createMany(users, false, undefined, { parallel: true, concurrency: 4 });
+            await BenchUser.createMany(users, { skipDuplicates: false, parallel: true, concurrency: 4 });
             const parTime = Date.now() - parStart;
 
             const speedup = seqTime / parTime;
@@ -152,7 +152,7 @@ describeOrSkip('Parallel Operations - Performance Benchmarks', () => {
             await db.clear();
             await BenchUser.createMany(initialUsers);
             const seqStart = Date.now();
-            await BenchUser.upsertMany(upsertUsers, undefined, { parallel: false });
+            await BenchUser.upsertMany(upsertUsers, { parallel: false });
             const seqTime = Date.now() - seqStart;
 
             // Parallel
@@ -160,7 +160,7 @@ describeOrSkip('Parallel Operations - Performance Benchmarks', () => {
             await db.clear();
             await BenchUser.createMany(initialUsers);
             const parStart = Date.now();
-            await BenchUser.upsertMany(upsertUsers, undefined, { parallel: true, concurrency: 4 });
+            await BenchUser.upsertMany(upsertUsers, { parallel: true, concurrency: 4 });
             const parTime = Date.now() - parStart;
 
             const speedup = seqTime / parTime;
@@ -190,7 +190,7 @@ describeOrSkip('Parallel Operations - Performance Benchmarks', () => {
                 await db.clear();
                 
                 const start = Date.now();
-                await BenchUser.createMany(users, false, undefined, { 
+                await BenchUser.createMany(users, { skipDuplicates: false, 
                     parallel: concurrency > 1, 
                     concurrency 
                 });
@@ -228,14 +228,14 @@ describeOrSkip('Parallel Operations - Performance Benchmarks', () => {
             configurePrisma(prisma, { maxConcurrency: 1, enableParallel: false });
             await db.clear();
             const seqStart = Date.now();
-            await BenchUser.createMany(users, false, undefined, { parallel: false });
+            await BenchUser.createMany(users, { skipDuplicates: false, parallel: false });
             const seqTime = Date.now() - seqStart;
 
             // Parallel
             configurePrisma(prisma, { maxConcurrency: 8, enableParallel: true });
             await db.clear();
             const parStart = Date.now();
-            await BenchUser.createMany(users, false, undefined, { 
+            await BenchUser.createMany(users, { skipDuplicates: false, 
                 parallel: true, 
                 concurrency: db.provider === 'mongodb' ? 2 : 8 
             });
@@ -278,7 +278,7 @@ describeOrSkip('Parallel Operations - Performance Benchmarks', () => {
             await db.clear();
             await BenchUser.createMany(initialUsers);
             const seqStart = Date.now();
-            await BenchUser.upsertMany(upsertUsers, undefined, { parallel: false });
+            await BenchUser.upsertMany(upsertUsers, { parallel: false });
             const seqTime = Date.now() - seqStart;
 
             // Parallel
@@ -286,7 +286,7 @@ describeOrSkip('Parallel Operations - Performance Benchmarks', () => {
             await db.clear();
             await BenchUser.createMany(initialUsers);
             const parStart = Date.now();
-            await BenchUser.upsertMany(upsertUsers, undefined, { 
+            await BenchUser.upsertMany(upsertUsers, { 
                 parallel: true, 
                 concurrency: db.provider === 'mongodb' ? 2 : 8 
             });

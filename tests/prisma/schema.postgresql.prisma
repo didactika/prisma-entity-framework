@@ -51,12 +51,48 @@ model Comment {
 }
 
 model Product {
-  id        Int      @id @default(autoincrement())
-  name      String
-  sku       String   @unique
-  tags      String[] @default([])
-  metadata  Json?
-  settings  Json?
+  id         Int      @id @default(autoincrement())
+  name       String
+  sku        String   @unique
+  tags       String[] @default([])
+  categories String[] @default([])
+  ratings    Int[]    @default([])
+  metadata   Json?
+  settings   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// Explicit many-to-many relationship models for testing
+model Area {
+  id        Int              @id @default(autoincrement())
+  name      String           @unique
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  
+  subjects  AreasOnSubjects[]
+}
+
+model Subject {
+  id        Int              @id @default(autoincrement())
+  name      String           @unique
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  
+  areas     AreasOnSubjects[]
+}
+
+// Explicit join table with additional fields
+model AreasOnSubjects {
+  areaId    Int
+  subjectId Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  
+  area      Area     @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  
+  @@id([areaId, subjectId])
+  @@index([areaId])
+  @@index([subjectId])
 }

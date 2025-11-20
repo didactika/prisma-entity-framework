@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import BaseEntity from '../src/base-entity';
-import { configurePrisma, resetPrismaConfiguration } from '../src/config';
+import BaseEntity from '../src/core/base-entity';
+import { configurePrisma, resetPrismaConfiguration } from '../src/core/config';
 import { mockPrismaClient } from './__mocks__/prisma-client.mock';
 
 interface IBaseEntity {
@@ -42,10 +42,10 @@ class User extends BaseEntity<IUser> {
       name: 'user',
       dbName: 'users',
       fields: [
-        { name: 'id', dbName: 'id', kind: 'scalar' },
-        { name: 'name', dbName: 'name', kind: 'scalar' },
-        { name: 'email', dbName: 'email', kind: 'scalar' },
-        { name: 'age', dbName: 'age', kind: 'scalar' },
+        { name: 'id', dbName: 'id', kind: 'scalar' as const, type: 'Int' },
+        { name: 'name', dbName: 'name', kind: 'scalar' as const, type: 'String' },
+        { name: 'email', dbName: 'email', kind: 'scalar' as const, type: 'String' },
+        { name: 'age', dbName: 'age', kind: 'scalar' as const, type: 'Int' },
       ]
     };
   }
@@ -94,8 +94,8 @@ describe('BaseEntity - Upsert', () => {
       const newData = { email: 'new@example.com', name: 'New User' };
       const createdRecord = { id: 1, ...newData };
 
-      mockPrismaClient.user.findFirst.mockResolvedValue(null);
-      mockPrismaClient.user.create.mockResolvedValue(createdRecord);
+      jest.spyOn(mockPrismaClient.user, 'findFirst').mockResolvedValue(null);
+      jest.spyOn(mockPrismaClient.user, 'create').mockResolvedValue(createdRecord);
 
       const result = await User.upsert(newData);
 
@@ -110,8 +110,8 @@ describe('BaseEntity - Upsert', () => {
       const updateData = { email: 'existing@example.com', name: 'New Name' };
       const updatedRecord = { id: 1, email: 'existing@example.com', name: 'New Name' };
 
-      mockPrismaClient.user.findFirst.mockResolvedValue(existingRecord);
-      mockPrismaClient.user.update.mockResolvedValue(updatedRecord);
+      jest.spyOn(mockPrismaClient.user, 'findFirst').mockResolvedValue(existingRecord);
+      jest.spyOn(mockPrismaClient.user, 'update').mockResolvedValue(updatedRecord);
 
       const result = await User.upsert(updateData);
 
@@ -124,7 +124,7 @@ describe('BaseEntity - Upsert', () => {
       const existingRecord = { id: 1, email: 'same@example.com', name: 'Same Name' };
       const sameData = { email: 'same@example.com', name: 'Same Name' };
 
-      mockPrismaClient.user.findFirst.mockResolvedValue(existingRecord);
+      jest.spyOn(mockPrismaClient.user, 'findFirst').mockResolvedValue(existingRecord);
 
       const result = await User.upsert(sameData);
 
@@ -145,16 +145,16 @@ describe('BaseEntity - Upsert', () => {
       ];
 
       // Mock findMany to return existing records (batch query)
-      mockPrismaClient.user.findMany.mockResolvedValue([
+      jest.spyOn(mockPrismaClient.user, 'findMany').mockResolvedValue([
         { id: 2, email: 'update@example.com', name: 'Old Name' },
         { id: 3, email: 'same@example.com', name: 'Same Name' }
       ]);
 
       // Mock createMany for new records
-      mockPrismaClient.user.createMany.mockResolvedValue({ count: 1 });
+      jest.spyOn(mockPrismaClient.user, 'createMany').mockResolvedValue({ count: 1 });
 
       // Mock updateManyById (raw query) for updates
-      mockPrismaClient.$executeRawUnsafe.mockResolvedValue(1);
+      jest.spyOn(mockPrismaClient, '$executeRawUnsafe').mockResolvedValue(1);
 
       const result = await User.upsertMany(items);
 
@@ -173,10 +173,10 @@ describe('BaseEntity - Upsert', () => {
       ];
 
       // Mock findMany to return no existing records
-      mockPrismaClient.user.findMany.mockResolvedValue([]);
+      jest.spyOn(mockPrismaClient.user, 'findMany').mockResolvedValue([]);
 
       // Mock createMany
-      mockPrismaClient.user.createMany.mockResolvedValue({ count: 2 });
+      jest.spyOn(mockPrismaClient.user, 'createMany').mockResolvedValue({ count: 2 });
 
       const result = await User.upsertMany(items);
 
