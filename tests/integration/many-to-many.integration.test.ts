@@ -377,7 +377,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
       let history = await db.client.subject.findFirst({ where: { name: 'History' } });
       
       // Note: In some test runs, the subject may not be immediately available
-      if (!history || history === null || history === undefined) {
+      if (!history) {
         console.warn('History subject not found immediately after creation, skipping test');
         return; // Skip rest of test
       }
