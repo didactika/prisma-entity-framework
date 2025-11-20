@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2025-11-20
+
+### Changed
+- **IMPORTANT**: Removed `skipDuplicates` and other standalone parameters from `createMany` and `upsertMany` in favor of a unified `options` object.
+    - `createMany(items, skipDuplicates)` -> `createMany(items, { skipDuplicates })`
+    - `upsertMany(items, keyTransformTemplate)` -> `upsertMany(items, { keyTransformTemplate })`
+    - `updateManyById(dataList, parallel, concurrency)` -> `updateManyById(dataList, { parallel, concurrency })`
+- **IMPORTANT**: The generic type constraint for entity operations has been changed from `Record<string, unknown>` to `object`. This supports a wider range of entity models (including class instances) but may break implementations relying on strict `Record` types. Consumers extending `BaseEntity` should update their generic constraints to `object` or `Record<string, any>`.
+- **Consolidated Batch Options**: Refactored batch operations (`createMany`, `upsert`, `upsertMany`, `updateManyById`) to use a consistent options object pattern. This improves API extensibility and readability.
+- **Generic Type Refactoring**: Relaxed generic type constraints from `Record<string, unknown>` to `object` (and renamed `T` to `TModel`) across `BaseEntity`, `BaseEntityBatch`, `BaseEntityQuery`, and `DataUtils`.
+- **Type Safety**: Improved type safety in `DataUtils.extractManyToManyRelations` with explicit casting.
+- **Documentation**: Updated API documentation to reflect the new options object pattern and provide detailed parameter descriptions.
+
+### Added
+- **Test Infrastructure**: Updated `prisma-client.mock.ts` to include mock implementations for `findUnique`, `updateMany`, and `upsert` to support new test cases.
+
 ## [1.0.3] - 2025-10-30
 ### Fixed
 Added SqlServer in supported database providers list
@@ -107,11 +123,6 @@ Added SqlServer in supported database providers list
   - Graceful fallback strategies for failed batch operations
   - More informative console logging for debugging
 
-### Performance
-- **MongoDB**: Batch updates now use transactions (up to 100x faster than individual updates)
-- **All Databases**: Optimized batch size selection based on database provider
-- **Memory**: Better memory estimation and safety checks for large batches
-
 ## [0.1.13] - 2025-10-27
 
 ### Added
@@ -120,6 +131,7 @@ Added SqlServer in supported database providers list
   - Automatic detection of JSON fields using Prisma model metadata
   - PostgreSQL-specific JSONB casting in batch update queries
   - 13 comprehensive integration tests for JSON field operations in PostgreSQL
+  - Added 3 unit tests for JSON field preservation in `DataUtils`
   - New `Product` model in test schemas with `metadata` and `settings` JSON fields
 
 ### Changed
@@ -146,11 +158,6 @@ Added SqlServer in supported database providers list
 - Fixed JSON fields being incorrectly filtered out in batch update operations
 - Fixed JSON objects being converted to `[object Object]` in SQL queries
 - Fixed `update()` method not passing `modelInfo` to `processRelations()` after merge
-
-### Tests
-- Added 13 integration tests for JSON field operations (create, update, upsert, upsertMany, createMany)
-- Added 3 unit tests for JSON field preservation in `DataUtils`
-- All 309 tests passing across SQLite, MySQL, and PostgreSQL
 
 
 ## [0.1.12] - 2025-10-20
@@ -199,12 +206,6 @@ Added SqlServer in supported database providers list
 - Updated `SearchBuilder.build()` and `apply()` to propagate `modelInfo` through the query building chain
 - Updated `BaseEntity.findByFilter()` to pass `modelInfo` to search filter operations
 - Enhanced `ObjectUtils.assign()` to create Prisma-compliant structures when modelInfo is provided
-
-### Tests
-- Added 3 unit tests for `ObjectUtils.assign()` with modelInfo parameter
-- Added 7 unit tests for `ObjectUtils.buildWithRelations()` method
-- Added 8 integration tests for search queries with nested array relations
-- Total: 18 new tests in v0.1.10, all 267 tests passing
 
 ## [0.1.9] - 2025-10-16
 
@@ -306,14 +307,6 @@ Added SqlServer in supported database providers list
 - Updated `BaseEntity.createMany()` to handle database-specific features (e.g., `skipDuplicates` support)
 - Enhanced package.json with new test scripts for different databases
 - Improved test utilities to support dynamic Prisma client loading per database
-
-### Technical Details
-- SQL generation now adapts to database dialect automatically
-- Boolean values formatted correctly for each database (1/0 for MySQL/SQLite, TRUE/FALSE for PostgreSQL)
-- Identifier quoting uses correct syntax (backticks for MySQL, double quotes for PostgreSQL/SQLite/others)
-- RETURNING clause support detection for optimized queries
-- Dynamic Prisma client imports for multi-database testing
-- Database capability detection (e.g., `skipDuplicates` parameter support)
 
 ## [0.1.0] - 2025-10-09
 
