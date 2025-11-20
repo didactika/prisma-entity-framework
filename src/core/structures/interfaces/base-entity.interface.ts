@@ -2,7 +2,9 @@
  * Represents a base entity with generic CRUD operations.
  * @template TModel - The type of the data model.
  */
-export interface IBaseEntity<TModel extends object = Record<string, unknown>> {    /**
+export interface IBaseEntity<TModel extends object = Record<string, unknown>> {
+
+    /**
      * Unique identifier of the entity (optional).
      * Can be a number (for SQL databases) or string (for MongoDB ObjectId).
      */
