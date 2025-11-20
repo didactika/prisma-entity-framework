@@ -321,7 +321,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
       
       // Note: In some test runs, the subject may not be immediately available
       // This can happen due to transaction timing or test isolation issues
-      if (!subject || subject === null || subject === undefined) {
+      if (!subject) {
         console.warn('Biology subject not found immediately after creation, skipping test');
         return; // Skip rest of test
       }
