@@ -1,67 +1,26 @@
 export interface EntityPrismaModel<T extends object = Record<string, unknown>> {
-    name: string;
+    name?: string;
     $parent?: unknown;
 
-    findMany(args: {
-        where: Record<string, unknown>;
-        include?: Record<string, unknown>;
-        take?: number;
-        skip?: number;
-        orderBy?: Record<string, unknown>;
-    }): Promise<Array<T & { id: number | string }>>;
+    findMany(args?: any): Promise<Array<T & { id: number | string }>>;
 
-    findMany(args: {
-        where: Record<string, unknown>;
-    }): Promise<Array<T & { id: number | string }>>;
+    findFirst(args?: any): Promise<(T & { id: number | string }) | null>;
 
-    findFirst(args: {
-        where?: Record<string, unknown>;
-        include?: Record<string, unknown>;
-        orderBy?: Record<string, unknown>;
-        skip?: number;
-        take?: number;
-    }): Promise<(T & { id: number | string }) | null>;
+    findUnique(args: any): Promise<(T & { id: number | string }) | null>;
 
-    findUnique(args: {
-        where: Record<string, unknown>;
-        include?: Record<string, unknown>;
-    }): Promise<(T & { id: number | string }) | null>;
+    count(args?: any): Promise<number>;
 
-    count(args: { where: Record<string, unknown> }): Promise<number>;
+    deleteMany(args?: any): Promise<{ count: number }>;
 
-    deleteMany(args: {
-        where: Record<string, unknown>;
-    }): Promise<{ count: number }>;
+    delete(args: any): Promise<T & { id: number | string }>;
 
-    delete(args: {
-        where: { id: number | string } | Record<string, unknown>;
-    }): Promise<T & { id: number | string }>;
+    createMany(args: any): Promise<{ count: number }>;
 
-    createMany(args: {
-        data: Array<Record<string, unknown>>;
-        skipDuplicates?: boolean;
-    }): Promise<{ count: number }>;
+    create(args: any): Promise<T & { id: number | string }>;
 
-    create(args: {
-        data: Record<string, unknown>;
-    }): Promise<T & { id: number | string }>;
+    update(args: any): Promise<T & { id: number | string }>;
 
-    update(args: {
-        where: { id: number | string } | Record<string, unknown>;
-        data: Record<string, unknown>;
-    }): Promise<T & { id: number | string }>;
+    updateMany(args: any): Promise<{ count: number }>;
 
-    updateMany(args: {
-        where?: Record<string, unknown>;
-        data: Record<string, unknown>;
-    }): Promise<{ count: number }>;
-
-    upsert(args: {
-        where: Record<string, unknown>;
-        create: Record<string, unknown>;
-        update: Record<string, unknown>;
-        include?: Record<string, unknown>;
-    }): Promise<T & { id: number | string }>;
-
-    [key: string]: unknown;
+    upsert(args: any): Promise<T & { id: number | string }>;
 }
