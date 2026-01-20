@@ -174,8 +174,12 @@ export function shouldSkipField(key: string, value: any): boolean {
     // Skip createdAt always
     if (key === 'createdAt') return true;
 
-    // Skip updatedAt if it's undefined or an object (Prisma operation)
-    if (key === 'updatedAt' && (value === undefined || typeof value === 'object')) return true;
+    // Skip updatedAt if it's undefined or a non-Date object (Prisma operation)
+    // Note: Date objects for updatedAt should be preserved
+    if (key === 'updatedAt' && (value === undefined || (typeof value === 'object' && !(value instanceof Date)))) return true;
+
+    // Preserve Date objects - they pass isObject but should not be treated as empty or as Prisma operations
+    if (value instanceof Date) return false;
 
     // Skip empty objects
     if (isObject(value) && isEmpty(value)) return true;

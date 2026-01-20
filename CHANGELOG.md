@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-01-19
+
+### Fixed
+
+- **Date Field Handling**: Fixed Date objects being incorrectly processed across multiple methods:
+  - `processRelations()` - Date objects were wrapped in `{ create: {} }` structures
+  - `sanitizeKeysRecursive()` - Date objects were converted to empty `{}` objects
+  - `shouldSkipField()` - Date objects were incorrectly skipped because `isEmpty(Date)` returned true
+  - All DateTime fields now correctly preserve Date objects and null values
+
+### Changed
+
+- **Prisma Version**: Pinned `prisma` to `6.19.1` and constrained `@prisma/client` peer dependency to `>=6.0.0 <7.0.0`
+
+### Added
+
+- **DateTime Integration Tests**: New `datetime-fields.integration.test.ts` with 8 tests for Date object handling
+- **Date Unit Tests**: 3 new unit tests in `data-utils.test.ts` for Date preservation
+- **Test Model**: Added `Job` model to test schema with explicit `scheduledFor DateTime?` field
+
+## [1.1.2] - 2026-01-19
+
+### Fixed
+
+- **Date Field Handling (initial fix)**: Fixed `processRelations()` incorrectly wrapping Date objects in `{ create: {} }` structures
+
+### Changed
+
+- **Prisma Version**: Pinned `prisma` to `6.19.1` and constrained `@prisma/client` peer dependency to `>=6.0.0 <7.0.0`
+
 ## [1.1.1] - 2025-11-20
 
 ### Fixed
@@ -98,7 +128,6 @@ Added SqlServer in supported database providers list
 ### Added
 
 - **MongoDB Support**: Full support for MongoDB databases
-
   - Added MongoDB provider to `DatabaseProvider` type
   - Created MongoDB Prisma schema (`tests/prisma/schema.mongodb.prisma`)
   - Added MongoDB Docker container configuration
@@ -125,14 +154,12 @@ Added SqlServer in supported database providers list
 ### Changed
 
 - **Flexible ID Types**: Updated `id` field to support both `number` and `string` types
-
   - `BaseEntity.id` is now `number | string | undefined`
   - `IBaseEntity.id` interface updated to support both types
   - `delete()` method return type changed to `number | string`
   - All database operations now handle both ID types correctly
 
 - **Optimized MongoDB Batch Operations**:
-
   - `updateManyById()` now uses Prisma transactions for MongoDB (atomic batch updates)
   - Added `MONGODB_TRANSACTION_BATCH_SIZE` constant (100 items per transaction)
   - Automatic fallback to individual updates if transaction fails
@@ -160,7 +187,6 @@ Added SqlServer in supported database providers list
 ### Changed
 
 - **Optimized Batch Upsert Performance**: Major performance improvements in `upsertMany()`
-
   - Changed from N individual queries to 1 batch query using `findMany({ OR: [...] })`
   - Batch comparison of changes in memory instead of individual checks
   - Batch operations: `createMany` + `updateManyById` instead of N individual operations
@@ -169,7 +195,6 @@ Added SqlServer in supported database providers list
   - Only compares fields present in new data (ignores extra fields in existing records)
 
 - **Enhanced Data Processing**:
-
   - `DataUtils.processRelations()` now accepts optional `modelInfo` parameter
   - Detects JSON fields (`type: 'Json'` or `type: 'Bytes'`) and preserves them without relation processing
   - All entity methods now pass `modelInfo` to `processRelations()`: `create()`, `update()`, `createMany()`, `upsert()`, `upsertMany()`, `updateManyById()`
@@ -322,7 +347,6 @@ Added SqlServer in supported database providers list
 ### Added
 
 - **Multi-Database Support**: Full support for MySQL, PostgreSQL, SQLite, and SQL Server
-
   - Automatic database provider detection from Prisma configuration
   - Database-specific SQL dialect handling (identifier quoting, boolean formatting)
   - New utility functions: `getDatabaseProvider()`, `getDatabaseDialect()`, `quoteIdentifier()`, `formatBoolean()`

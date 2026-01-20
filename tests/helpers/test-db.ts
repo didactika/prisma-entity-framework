@@ -5,11 +5,11 @@
  */
 
 import { getDatabaseProvider } from '../../src/core/utils/database-utils';
-import { 
+import {
   detectDatabaseCapabilities,
   logDatabaseCapabilities,
   type DatabaseProvider,
-  type DatabaseCapabilities 
+  type DatabaseCapabilities
 } from './database-detector';
 import { unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -23,19 +23,19 @@ let databaseInitialized = false;
 export interface TestDbInstance {
   /** Prisma client instance */
   client: any;
-  
+
   /** Database provider type */
   provider: DatabaseProvider;
-  
+
   /** Complete database capabilities */
   capabilities: DatabaseCapabilities;
-  
+
   /** Seed test data into database */
   seed: () => Promise<SeedData>;
-  
+
   /** Clear all test data from database */
   clear: () => Promise<void>;
-  
+
   /** Cleanup and disconnect from database */
   cleanup: () => Promise<void>;
 }
@@ -201,6 +201,9 @@ export async function setupTestDatabase(logCapabilities = false): Promise<TestDb
         if (client.product) {
           await client.product.deleteMany({});
         }
+        if (client.job) {
+          await client.job.deleteMany({});
+        }
 
         // Disconnect
         await client.$disconnect();
@@ -335,6 +338,9 @@ export async function clearTestDatabase(client: any): Promise<void> {
     if (client.product) {
       await client.product.deleteMany({});
     }
+    if (client.job) {
+      await client.job.deleteMany({});
+    }
   } catch (error) {
     // If tables don't exist, it's okay - they'll be created on first use
     console.warn('Warning: Could not clear test database, tables may not exist yet', error);
@@ -379,6 +385,6 @@ export async function createTestDb(logCapabilities = true): Promise<TestDbInstan
   if (logCapabilities) {
     logDatabaseCapabilities();
   }
-  
+
   return setupTestDatabase(logCapabilities);
 }

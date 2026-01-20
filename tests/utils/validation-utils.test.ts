@@ -379,10 +379,10 @@ describe('Validation Utils', () => {
         });
 
         /**
-         * Test: should skip updatedAt when it is a date (Date is an object)
+         * Test: should NOT skip updatedAt when it is a Date (Date objects should be preserved)
          */
-        it('should skip updatedAt when it is a date (Date is an object)', () => {
-            expect(shouldSkipField('updatedAt', new Date())).toBe(true);
+        it('should NOT skip updatedAt when it is a Date (Date objects should be preserved)', () => {
+            expect(shouldSkipField('updatedAt', new Date())).toBe(false);
         });
 
         /**

@@ -11,29 +11,29 @@ datasource db {
 }
 
 model User {
-  id        Int       @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   name      String
-  email     String    @unique
+  email     String   @unique
   age       Int?
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  
-  posts     Post[]
-  comments  Comment[]
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  posts    Post[]
+  comments Comment[]
 }
 
 model Post {
-  id        Int       @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   title     String
   content   String?
-  published Boolean   @default(false)
+  published Boolean  @default(false)
   authorId  Int
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  
-  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  comments  Comment[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author   User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments Comment[]
 }
 
 model Comment {
@@ -42,38 +42,38 @@ model Comment {
   postId    Int
   authorId  Int
   createdAt DateTime @default(now())
-  
-  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
 }
 
 model Product {
-  id          Int      @id @default(autoincrement())
-  name        String
-  sku         String   @unique
-  metadata    String?
-  settings    String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  name      String
+  sku       String   @unique
+  metadata  String?
+  settings  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // Explicit many-to-many relationship models for testing
 model Area {
-  id        Int              @id @default(autoincrement())
-  name      String           @unique
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  
-  subjects  AreasOnSubjects[]
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subjects AreasOnSubjects[]
 }
 
 model Subject {
-  id        Int              @id @default(autoincrement())
-  name      String           @unique
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  
-  areas     AreasOnSubjects[]
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  areas AreasOnSubjects[]
 }
 
 // Explicit join table with additional fields
@@ -82,9 +82,21 @@ model AreasOnSubjects {
   subjectId Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
-  area      Area     @relation(fields: [areaId], references: [id], onDelete: Cascade)
-  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  
+
+  area    Area    @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
   @@id([areaId, subjectId])
+}
+
+// Model for testing explicit DateTime fields that can be user-provided
+model Job {
+  id           Int       @id @default(autoincrement())
+  type         String
+  status       String    @default("pending")
+  scheduledFor DateTime?
+  completedAt  DateTime?
+  payload      String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }

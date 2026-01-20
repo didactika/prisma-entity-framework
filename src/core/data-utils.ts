@@ -187,6 +187,10 @@ export default class DataUtils {
             // Skip non-objects and non-arrays (use validation-utils.isObject for objects, but also check arrays)
             if (!isObject(value) && !Array.isArray(value)) continue;
 
+            // Skip native object types that should not be treated as relations
+            // Date, RegExp, Map, Set, etc. are objects but not relation candidates
+            if (value instanceof Date) continue;
+
             if (Array.isArray(value)) {
                 const relationArray = this.processRelationArray(value);
                 if (relationArray.length > 0) {
@@ -429,7 +433,7 @@ export default class DataUtils {
             for (const [fieldName, relatedItems] of Object.entries(relationData)) {
                 // Extract IDs from related items - optimize by pre-allocating array
                 const relatedIds: (number | string)[] = [];
-                
+
                 for (const item of relatedItems) {
                     if (hasId(item)) {
                         relatedIds.push(item.id);
@@ -693,8 +697,8 @@ export default class DataUtils {
                 const supportsSkipDuplicates = provider !== 'sqlite' && provider !== 'mongodb' && provider !== 'sqlserver';
 
                 // Use createMany with skipDuplicates to avoid errors on existing relations
-                const createOptions: { data: Array<Record<string, number | string>>; skipDuplicates?: boolean } = { 
-                    data: joinRecords 
+                const createOptions: { data: Array<Record<string, number | string>>; skipDuplicates?: boolean } = {
+                    data: joinRecords
                 };
                 if (supportsSkipDuplicates) {
                     createOptions.skipDuplicates = true;

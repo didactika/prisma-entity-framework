@@ -57,6 +57,9 @@ export default class BaseEntityHelpers {
     public static sanitizeKeysRecursive(obj: any): any {
         if (Array.isArray(obj)) {
             return obj.map((item) => this.sanitizeKeysRecursive(item));
+        } else if (obj instanceof Date) {
+            // Preserve Date objects as-is (they pass isObject check but shouldn't be iterated)
+            return obj;
         } else if (isObject(obj)) {
             // Use validation-utils.isObject
             return Object.keys(obj).reduce((acc, key) => {
@@ -108,7 +111,7 @@ export default class BaseEntityHelpers {
             let isDuplicate = false;
             // Cache constraint keys to avoid repeated string operations
             const constraintKeys: string[] = [];
-            
+
             for (const constraintFields of constraints) {
                 // Build key using array join (more efficient than repeated concatenation)
                 const keyParts: string[] = new Array(constraintFields.length);
@@ -116,7 +119,7 @@ export default class BaseEntityHelpers {
                     keyParts[i] = `${constraintFields[i]}:${item[constraintFields[i]]}`;
                 }
                 const key = keyParts.join('|');
-                
+
                 if (seen.has(key)) {
                     isDuplicate = true;
                     break;
@@ -364,14 +367,14 @@ export default class BaseEntityHelpers {
         }
 
         const provider = getDatabaseProviderCached(prisma);
-        
+
         // Pre-allocate array for better performance
         const setClauses: string[] = new Array(fieldsToUpdate.size);
         let clauseIndex = 0;
-        
+
         // Cache quoted identifiers to avoid repeated calls
         const quotedId = quoteIdentifier('id', prisma);
-        
+
         for (const field of fieldsToUpdate) {
             const fieldUpdates = updates[field];
             const isJsonField = jsonFields.has(field);
@@ -450,12 +453,12 @@ export default class BaseEntityHelpers {
 
             // Otherwise, treat as scalar array (PostgreSQL, etc.)
             const provider = prisma ? getDatabaseProviderCached(prisma) : 'sqlite';
-            
+
             if (provider === 'postgresql') {
                 // PostgreSQL native arrays use ARRAY constructor or array literal syntax
                 // For string arrays: ARRAY['value1', 'value2']
                 if (value.length === 0) return "ARRAY[]::text[]";
-                
+
                 const escapedElements = value.map((v) => {
                     if (typeof v === 'string') {
                         // Only escape single quotes for PostgreSQL array elements
@@ -465,7 +468,7 @@ export default class BaseEntityHelpers {
                 });
                 return `ARRAY[${escapedElements.join(', ')}]`;
             }
-            
+
             // For other databases (MySQL stores arrays as JSON)
             if (value.length === 0) return "''";
             const escapedElements = value.map((v) => {
