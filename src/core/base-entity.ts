@@ -111,11 +111,17 @@ export default abstract class BaseEntity<
      *     orderBy: { createdAt: 'desc' }
      *   }
      * );
+     * 
+     * // Array filter with OR grouping
+     * const result = await User.findByFilter(
+     *   [{ status: 'PENDING' }, { status: 'FAILED' }],
+     *   { filterGrouping: 'or' }
+     * );
      * ```
      */
     public static async findByFilter<TModel extends object>(
         this: BaseEntityCtor<TModel>,
-        filter: Partial<TModel>,
+        filter: FindByFilterOptions.FilterInput<TModel>,
         options: FindByFilterOptions.Options = FindByFilterOptions.defaultOptions
     ): Promise<FindByFilterOptions.PaginatedResponse<TModel> | TModel[] | TModel | null> {
         const entityModel = this.model;
@@ -149,7 +155,7 @@ export default abstract class BaseEntity<
     }
 
     public async findByFilter(
-        filter: Partial<TModel>,
+        filter: FindByFilterOptions.FilterInput<TModel>,
         options: FindByFilterOptions.Options = FindByFilterOptions.defaultOptions
     ): Promise<
         | FindByFilterOptions.PaginatedResponse<TModel>

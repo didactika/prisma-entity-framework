@@ -101,13 +101,24 @@ pnpm add prisma-entity-framework
     const user = new User({ name: "John" });
     await user.create();
     ```
--   🔍 **Advanced Query Builder**: Build complex, declarative queries with support for `LIKE`, ranges, and lists.
+-   🔍 **Advanced Query Builder**: Build complex, declarative queries with support for `LIKE`, ranges, lists, and OR/AND/NOT filter grouping.
     ```typescript
+    // Simple range search
     const users = await User.findByFilter({name: "John"}, {
-        search: {
-            rangeSearch: [{ keys: ['age'], min: 18 }]
-        }
+        search: { rangeSearch: [{ keys: ['age'], min: 18 }] }
     });
+
+    // OR filter grouping with includeNull for nullable DateTime fields
+    const users = await User.findByFilter(
+        [{ isActive: true }, { isVerified: true }],
+        {
+            filterGrouping: 'or',
+            search: {
+                rangeSearch: [{ keys: ['createdAt'], max: new Date(), includeNull: true }]
+            },
+            orderBy: [{ createdAt: 'asc' }, { name: 'asc' }]
+        }
+    );
     ```
 -   ⚡ **Optimized Batch Operations**: High-performance, database-aware batching for `createMany`, `updateMany`, and `upsertMany`.
     ```typescript

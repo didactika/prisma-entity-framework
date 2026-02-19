@@ -10,6 +10,7 @@ export namespace FindByFilterOptions {
         keys?: string[];
         min?: number | Date;
         max?: number | Date;
+        includeNull?: boolean;
         grouping?: "and" | "or";
     };
 
@@ -44,12 +45,19 @@ export namespace FindByFilterOptions {
     export type NestedRelations = Array<{ [relation: string]: NestedRelations }> | "*";
 
 
+    export type OrderByItem = Record<string, 'asc' | 'desc'>;
+    export type OrderBy = OrderByItem | OrderByItem[];
+
+    export type FilterGrouping = 'and' | 'or';
+    export type FilterInput<T> = Partial<T> | Partial<T>[];
+
     export type Options = {
         onlyOne?: boolean;
         relationsToInclude?: NestedRelations;
         search?: SearchOptions;
         pagination?: PaginationOptions;
-        orderBy?: Record<string, 'asc' | 'desc'>;
+        orderBy?: OrderBy;
+        filterGrouping?: FilterGrouping;
         parallel?: boolean;
         concurrency?: number;
         rateLimit?: number;
@@ -61,6 +69,7 @@ export namespace FindByFilterOptions {
         search: undefined,
         pagination: undefined,
         orderBy: undefined,
+        filterGrouping: undefined,
         parallel: undefined,
         concurrency: undefined,
         rateLimit: undefined

@@ -490,4 +490,110 @@ describe('SearchBuilder', () => {
       expect(result.OR).toContainEqual({ user: { email: { contains: 'john' } } });
     });
   });
+
+  describe('rangeSearch with includeNull', () => {
+    /**
+     * Test: should include null condition when includeNull is true
+     */
+    it('should include null condition when includeNull is true', () => {
+      const result = SearchBuilder.build({}, {
+        rangeSearch: [{
+          keys: ['scheduledFor'],
+          max: new Date('2026-02-18'),
+          includeNull: true
+        }]
+      });
+
+      expect(result).toHaveProperty('OR');
+      expect(result.OR).toHaveLength(2);
+      expect(result.OR[0]).toHaveProperty('scheduledFor');
+      expect(result.OR[0].scheduledFor).toHaveProperty('lte');
+      expect(result.OR[1]).toEqual({ scheduledFor: null });
+    });
+
+    /**
+     * Test: should not include null when includeNull is false
+     */
+    it('should not include null when includeNull is false', () => {
+      const result = SearchBuilder.build({}, {
+        rangeSearch: [{
+          keys: ['age'],
+          max: 65,
+          includeNull: false
+        }]
+      });
+
+      expect(result).not.toHaveProperty('OR');
+      expect(result).toHaveProperty('age', { lte: 65 });
+    });
+
+    /**
+     * Test: should not include null when includeNull is not specified
+     */
+    it('should not include null when includeNull is not specified', () => {
+      const result = SearchBuilder.build({}, {
+        rangeSearch: [{
+          keys: ['age'],
+          max: 65
+        }]
+      });
+
+      expect(result).not.toHaveProperty('OR');
+      expect(result).toHaveProperty('age', { lte: 65 });
+    });
+
+    /**
+     * Test: should handle includeNull with both min and max
+     */
+    it('should handle includeNull with both min and max', () => {
+      const result = SearchBuilder.build({}, {
+        rangeSearch: [{
+          keys: ['age'],
+          min: 18,
+          max: 65,
+          includeNull: true
+        }]
+      });
+
+      expect(result).toHaveProperty('OR');
+      expect(result.OR).toHaveLength(2);
+      expect(result.OR[0]).toEqual({ age: { gte: 18, lte: 65 } });
+      expect(result.OR[1]).toEqual({ age: null });
+    });
+
+    /**
+     * Test: should handle includeNull with only min
+     */
+    it('should handle includeNull with only min', () => {
+      const result = SearchBuilder.build({}, {
+        rangeSearch: [{
+          keys: ['createdAt'],
+          min: new Date('2024-01-01'),
+          includeNull: true
+        }]
+      });
+
+      expect(result).toHaveProperty('OR');
+      expect(result.OR).toHaveLength(2);
+      expect(result.OR[0].createdAt).toHaveProperty('gte');
+      expect(result.OR[1]).toEqual({ createdAt: null });
+    });
+
+    /**
+     * Test: should combine includeNull with base filter
+     */
+    it('should combine includeNull with base filter', () => {
+      const result = SearchBuilder.build({ status: 'PENDING' }, {
+        rangeSearch: [{
+          keys: ['scheduledFor'],
+          max: new Date('2026-02-18'),
+          includeNull: true
+        }]
+      });
+
+      expect(result.status).toBe('PENDING');
+      expect(result).toHaveProperty('OR');
+      expect(result.OR).toHaveLength(2);
+    });
+  });
 });

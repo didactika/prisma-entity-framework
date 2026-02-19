@@ -1438,4 +1438,179 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       });
     });
   });
+
+  describe('filterGrouping with array filters', () => {
+    beforeEach(async () => {
+      await db.seed();
+    });
+
+    /**
+     * Test: should find users with OR filter grouping
+     */
+    it('should find users with OR filter grouping', async () => {
+      const users = await User.findByFilter(
+        [
+          { name: 'John Doe' },
+          { name: 'Jane Smith' }
+        ],
+        { filterGrouping: 'or' }
+      ) as any[];
+
+      expect(users.length).toBe(2);
+      const names = users.map((u: any) => u.name);
+      expect(names).toContain('John Doe');
+      expect(names).toContain('Jane Smith');
+    });
+
+    /**
+     * Test: should find users with AND filter grouping
+     */
+    it('should find users with AND filter grouping', async () => {
+      const users = await User.findByFilter(
+        [
+          { isActive: true },
+          { name: 'John Doe' }
+        ],
+        { filterGrouping: 'and' }
+      ) as any[];
+
+      expect(users.length).toBe(1);
+      expect(users[0].name).toBe('John Doe');
+      expect(users[0].isActive).toBe(true);
+    });
+
+    /**
+     * Test: should default to AND when filterGrouping not specified
+     */
+    it('should default to AND when filterGrouping not specified', async () => {
+      const users = await User.findByFilter(
+        [
+          { isActive: true },
+          { name: 'Bob Johnson' }
+        ]
+      ) as any[];
+
+      // Bob Johnson is NOT active, so AND should return 0 results
+      expect(users.length).toBe(0);
+    });
+
+    /**
+     * Test: should maintain backwards compatibility with single filter object
+     */
+    it('should maintain backwards compatibility with single filter', async () => {
+      const users = await User.findByFilter({ name: 'John Doe' }) as any[];
+
+      expect(users.length).toBe(1);
+      expect(users[0].name).toBe('John Doe');
+    });
+  });
+
+  describe('rangeSearch includeNull', () => {
+    beforeEach(async () => {
+      await db.clear();
+      // Create jobs with various scheduledFor values
+      await prisma.job.createMany({
+        data: [
+          { type: 'TEST', status: 'PENDING', scheduledFor: new Date('2026-01-01') },
+          { type: 'TEST', status: 'PENDING', scheduledFor: new Date('2026-03-01') },
+          { type: 'TEST', status: 'PENDING', scheduledFor: null },
+          { type: 'OTHER', status: 'COMPLETED', scheduledFor: new Date('2026-01-15') },
+        ]
+      });
+    });
+
+    /**
+     * Test: should include null values with includeNull option
+     */
+    it('should include null values with includeNull option', async () => {
+      // Create a simple Job entity class for this test
+      interface IJob {
+        id?: number | string;
+        type: string;
+        status: string;
+        scheduledFor?: Date | null;
+      }
+
+      class Job extends BaseEntity<IJob> implements IJob {
+        static override readonly model: PrismaClient['job'];
+        
+        public declare readonly id?: IJob['id'];
+        @Property() declare type: IJob['type'];
+        @Property() declare status: IJob['status'];
+        @Property() declare scheduledFor: IJob['scheduledFor'];
+
+        constructor(data?: Partial<IJob>) {
+          super(data);
+        }
+      }
+      (Job as any).model = prisma.job;
+
+      const jobs = await Job.findByFilter(
+        { status: 'PENDING' },
+        {
+          search: {
+            rangeSearch: [{
+              keys: ['scheduledFor'],
+              max: new Date('2026-02-18'),
+              includeNull: true
+            }]
+          }
+        }
+      ) as any[];
+
+      // Should find: Jan 1 (before cutoff) and null
+      // Should NOT find: Mar 1 (after cutoff)
+      expect(jobs.length).toBe(2);
+      
+      const scheduledForValues = jobs.map((j: any) => j.scheduledFor);
+      const hasNull = scheduledForValues.some((v: any) => v === null);
+      const hasPastDate = scheduledForValues.some((v: any) => v && new Date(v) <= new Date('2026-02-18'));
+      
+      expect(hasNull).toBe(true);
+      expect(hasPastDate).toBe(true);
+    });
+
+    /**
+     * Test: should NOT include null values without includeNull option
+     */
+    it('should NOT include null values without includeNull option', async () => {
+      interface IJob {
+        id?: number | string;
+        type: string;
+        status: string;
+        scheduledFor?: Date | null;
+      }
+
+      class Job extends BaseEntity<IJob> implements IJob {
+        static override readonly model: PrismaClient['job'];
+        
+        public declare readonly id?: IJob['id'];
+        @Property() declare type: IJob['type'];
+        @Property() declare status: IJob['status'];
+        @Property() declare scheduledFor: IJob['scheduledFor'];
+
+        constructor(data?: Partial<IJob>) {
+          super(data);
+        }
+      }
+      (Job as any).model = prisma.job;
+
+      const jobs = await Job.findByFilter(
+        { status: 'PENDING' },
+        {
+          search: {
+            rangeSearch: [{
+              keys: ['scheduledFor'],
+              max: new Date('2026-02-18')
+              // No includeNull
+            }]
+          }
+        }
+      ) as any[];
+
+      // Should find only Jan 1 (before cutoff, not null)
+      expect(jobs.length).toBe(1);
+      expect(jobs[0].scheduledFor).not.toBeNull();
+    });
+  });
 });

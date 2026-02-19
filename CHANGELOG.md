@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-02-18
+
+### Changed
+
+- **Documentation**: Updated README and advanced-examples.md with `filterGrouping`, `includeNull`, and multiple `orderBy` examples
+
+## [1.1.4] - 2026-02-18
+
+### Added
+
+- **Array Filter Support**: `findByFilter` now accepts an array of filter objects with `filterGrouping` option
+  - `filterGrouping: 'or'` combines filters with OR logic
+  - `filterGrouping: 'and'` (default) combines filters with AND logic
+  - Example: `findByFilter([{ status: 'PENDING' }, { status: 'FAILED' }], { filterGrouping: 'or' })`
+
+- **includeNull Option for rangeSearch**: New `includeNull` property in `RangeSearch` type
+  - When `true`, includes records where the field is NULL in addition to matching the range
+  - Useful for queries like "scheduledFor <= now OR scheduledFor IS NULL"
+  - Example: `rangeSearch: [{ keys: ['scheduledFor'], max: new Date(), includeNull: true }]`
+
+- **New Types**: Added `FilterGrouping`, `FilterInput<T>` types for better type safety
+
+- **Unit Tests**: Added 10 new unit tests for array filters and includeNull functionality
+
+- **Integration Tests**: Added 6 new integration tests for filterGrouping and includeNull
+
+### Fixed
+
+- **Multiple OrderBy Fields**: Fixed `orderBy` option to support arrays for multiple sort fields
+
+### Changed
+
+- **OrderBy Type**: Updated `OrderBy` type from `Record<string, 'asc' | 'desc'>` to `OrderByItem | OrderByItem[]` to properly support both single and multiple field sorting
+- **sortResults Method**: Updated internal `sortResults()` to iterate through all orderBy items when sorting in-memory results
+- **findByFilter Signature**: Updated to accept `FilterInput<TModel>` (single filter or array of filters)
+
 ## [1.1.3] - 2026-01-19
 
 ### Fixed

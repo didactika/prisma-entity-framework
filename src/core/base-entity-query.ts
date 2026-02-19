@@ -25,6 +25,7 @@ const CHUNK_SIZE = 10000;
  * - Automatic chunking for large list searches (>10k items)
  * - Parallel execution for improved performance
  * - Optimized OR batching for large condition sets
+ * - Array filter support with filterGrouping (OR/AND)
  */
 export default class BaseEntityQuery {
     /**
@@ -32,11 +33,13 @@ export default class BaseEntityQuery {
      * 
      * Supports relation includes, complex searches, and automatic chunking for large list searches (>10k items).
      * Automatically optimizes queries with large OR conditions using batching.
+     * 
+     * @param filter - Single filter object or array of filters (combined with options.filterGrouping)
      */
     public static async findByFilter<TModel extends object>(
         entityModel: EntityPrismaModel<TModel>,
         getModelInformation: () => ModelInfo,
-        filter: Partial<TModel>,
+        filter: FindByFilterOptions.FilterInput<TModel>,
         options: FindByFilterOptions.Options = FindByFilterOptions.defaultOptions
     ): Promise<
         | FindByFilterOptions.PaginatedResponse<TModel>
@@ -68,10 +71,28 @@ export default class BaseEntityQuery {
             }
         }
 
-        const whereClauseBase = SearchUtils.applyDefaultFilters(
-            filter,
-            modelInfo
-        ) as Record<string, unknown>;
+        // Handle array of filters with filterGrouping
+        let whereClauseBase: Record<string, unknown>;
+        
+        if (Array.isArray(filter)) {
+            const filterGrouping = options.filterGrouping ?? 'and';
+            const processedFilters = filter.map(f => 
+                SearchUtils.applyDefaultFilters(f as Record<string, unknown>, modelInfo)
+            );
+            
+            // Wrap in AND to prevent OR batching optimization from interfering
+            // This ensures user-provided array filters work with complex conditions
+            if (filterGrouping === 'or') {
+                whereClauseBase = { AND: [{ OR: processedFilters }] };
+            } else {
+                whereClauseBase = { AND: processedFilters };
+            }
+        } else {
+            whereClauseBase = SearchUtils.applyDefaultFilters(
+                filter as Record<string, unknown>,
+                modelInfo
+            ) as Record<string, unknown>;
+        }
 
         const listSearch = options.search?.listSearch || [];
         const longIndex = listSearch.findIndex(
@@ -90,7 +111,7 @@ export default class BaseEntityQuery {
 
             const take: number | undefined = options.pagination?.take;
             const skip: number | undefined = options.pagination?.skip;
-            const orderBy = options.orderBy as Record<string, "asc" | "desc"> | undefined;
+            const orderBy = options.orderBy;
 
             const whereKeys = Object.keys(whereClause);
             const hasOnlyOr = whereKeys.length === 1 && whereKeys[0] === "OR";
@@ -218,8 +239,7 @@ export default class BaseEntityQuery {
                 flattened as (TModel & { id: unknown })[]
             ) as TModel[];
 
-            const orderBy = options.orderBy as Record<string, "asc" | "desc"> | undefined;
-            const finalResults = BaseEntityQuery.sortResults(deduplicated, orderBy);
+            const finalResults = BaseEntityQuery.sortResults(deduplicated, options.orderBy);
 
             if (options.onlyOne) return finalResults[0] ?? null;
 
@@ -312,25 +332,32 @@ export default class BaseEntityQuery {
 
     private static sortResults<TModel extends object>(
         data: TModel[],
-        orderBy?: Record<string, "asc" | "desc">
+        orderBy?: FindByFilterOptions.OrderBy
     ): TModel[] {
         if (!orderBy) return data;
 
-        const [orderByKey, orderByDirection] = Object.entries(orderBy)[0] as [
-            string,
-            "asc" | "desc"
-        ];
+        // Normalize orderBy to always be an array of OrderByItem
+        const orderByArray: FindByFilterOptions.OrderByItem[] = Array.isArray(orderBy) 
+            ? orderBy 
+            : [orderBy];
 
         return [...data].sort((a, b) => {
-            const aVal = (a as Record<string, unknown>)[orderByKey] as unknown;
-            const bVal = (b as Record<string, unknown>)[orderByKey] as unknown;
+            for (const orderByItem of orderByArray) {
+                const [orderByKey, orderByDirection] = Object.entries(orderByItem)[0] as [
+                    string,
+                    "asc" | "desc"
+                ];
 
-            if (aVal == null && bVal == null) return 0;
-            if (aVal == null) return orderByDirection === "asc" ? -1 : 1;
-            if (bVal == null) return orderByDirection === "asc" ? 1 : -1;
+                const aVal = (a as Record<string, unknown>)[orderByKey] as unknown;
+                const bVal = (b as Record<string, unknown>)[orderByKey] as unknown;
 
-            if (aVal < bVal) return orderByDirection === "asc" ? -1 : 1;
-            if (aVal > bVal) return orderByDirection === "asc" ? 1 : -1;
+                if (aVal == null && bVal == null) continue;
+                if (aVal == null) return orderByDirection === "asc" ? -1 : 1;
+                if (bVal == null) return orderByDirection === "asc" ? 1 : -1;
+
+                if (aVal < bVal) return orderByDirection === "asc" ? -1 : 1;
+                if (aVal > bVal) return orderByDirection === "asc" ? 1 : -1;
+            }
             return 0;
         });
     }

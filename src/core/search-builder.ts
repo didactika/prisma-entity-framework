@@ -46,8 +46,9 @@ export default class SearchBuilder {
     /**
      * Applies a specific type of search condition to the filter
      * Handles both AND and OR grouping of conditions
+     * Supports includeNull for range searches to include null values
      * 
-     * @template T - Type of search condition with optional keys and grouping
+     * @template T - Type of search condition with optional keys, grouping, and includeNull
      * @param filter - The filter object to modify
      * @param conditions - Array of search conditions to apply
      * @param buildCondition - Function to build the condition object from the search option
@@ -56,11 +57,12 @@ export default class SearchBuilder {
      * 
      * @remarks
      * - Skips invalid conditions using ConditionUtils.isValid()
+     * - For includeNull: creates OR with condition and null check
      * - For OR grouping: adds conditions to filter.OR array and tracks paths for cleanup
      * - For AND grouping: assigns conditions directly to filter using ObjectUtils.assign()
      * - Cleans up duplicate paths that appear in OR conditions
      */
-    private static apply<T extends { keys?: string[]; grouping?: "and" | "or" }>(
+    private static apply<T extends { keys?: string[]; grouping?: "and" | "or"; includeNull?: boolean }>(
         filter: Record<string, any>,
         conditions: T[],
         buildCondition: (opt: T) => any,
@@ -72,10 +74,22 @@ export default class SearchBuilder {
             const keys = option.keys ?? [];
             const grouping = option.grouping ?? "and";
             const condition = buildCondition(option);
+            const includeNull = option.includeNull ?? false;
 
             if (!ConditionUtils.isValid(condition)) continue;
 
-            if (grouping === "or") {
+            // If includeNull is true, create OR with condition and null
+            if (includeNull && keys.length > 0) {
+                filter.OR = filter.OR ?? [];
+                
+                for (const path of keys) {
+                    // Add the original condition
+                    filter.OR.push(ObjectUtils.buildWithRelations(path, condition, modelInfo));
+                    // Add the null condition
+                    filter.OR.push(ObjectUtils.buildWithRelations(path, null, modelInfo));
+                    orPaths.add(path);
+                }
+            } else if (grouping === "or") {
                 filter.OR = filter.OR ?? [];
 
                 for (const path of keys) {

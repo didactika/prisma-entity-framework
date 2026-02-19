@@ -260,6 +260,138 @@ describe('BaseEntity', () => {
       await User.findByFilter({});
       expect(mockPrismaClient.user.findMany).toHaveBeenCalled();
     });
+
+    /**
+     * Test: should support single orderBy field
+     */
+    it('should support single orderBy field', async () => {
+      const findManySpy = jest.spyOn(mockPrismaClient.user, 'findMany');
+      
+      await User.findByFilter({}, {
+        orderBy: { name: 'asc' }
+      });
+      
+      expect(findManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: { name: 'asc' }
+        })
+      );
+    });
+
+    /**
+     * Test: should support multiple orderBy fields as array
+     */
+    it('should support multiple orderBy fields as array', async () => {
+      const findManySpy = jest.spyOn(mockPrismaClient.user, 'findMany');
+      
+      await User.findByFilter({}, {
+        orderBy: [
+          { name: 'asc' },
+          { createdAt: 'desc' }
+        ]
+      });
+      
+      expect(findManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [
+            { name: 'asc' },
+            { createdAt: 'desc' }
+          ]
+        })
+      );
+    });
+
+    /**
+     * Test: should support array filter with OR grouping
+     */
+    it('should support array filter with OR grouping', async () => {
+      const findManySpy = jest.spyOn(mockPrismaClient.user, 'findMany');
+      
+      await User.findByFilter(
+        [
+          { name: 'John' },
+          { name: 'Jane' }
+        ],
+        { filterGrouping: 'or' }
+      );
+      
+      expect(findManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [{
+              OR: [
+                { name: { equals: 'John' } },
+                { name: { equals: 'Jane' } }
+              ]
+            }]
+          }
+        })
+      );
+    });
+
+    /**
+     * Test: should support array filter with AND grouping
+     */
+    it('should support array filter with AND grouping', async () => {
+      const findManySpy = jest.spyOn(mockPrismaClient.user, 'findMany');
+      
+      await User.findByFilter(
+        [
+          { isActive: true },
+          { age: 30 }
+        ],
+        { filterGrouping: 'and' }
+      );
+      
+      expect(findManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              { isActive: { equals: true } },
+              { age: { equals: 30 } }
+            ]
+          }
+        })
+      );
+    });
+
+    /**
+     * Test: should default to AND for array filter without filterGrouping
+     */
+    it('should default to AND for array filter without filterGrouping', async () => {
+      const findManySpy = jest.spyOn(mockPrismaClient.user, 'findMany');
+      
+      await User.findByFilter([
+        { isActive: true },
+        { name: 'John' }
+      ]);
+      
+      expect(findManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: expect.any(Array)
+          }
+        })
+      );
+    });
+
+    /**
+     * Test: should maintain backwards compatibility with single filter object
+     */
+    it('should maintain backwards compatibility with single filter', async () => {
+      const findManySpy = jest.spyOn(mockPrismaClient.user, 'findMany');
+      
+      await User.findByFilter({ name: 'John', isActive: true });
+      
+      expect(findManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            name: { equals: 'John' },
+            isActive: { equals: true }
+          }
+        })
+      );
+    });
   });
 
   describe('countByFilter', () => {
