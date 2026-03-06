@@ -259,5 +259,49 @@ describe('BaseEntityHelpers', () => {
             const result = BaseEntityHelpers.escapeValue(date);
             expect(result).toContain('2024-01-01');
         });
+
+        /**
+         * Test: should wrap numeric JSON field values as JSON string literals
+         * Prevents PostgreSQL error: "cannot cast type integer to jsonb"
+         */
+        it('should wrap numeric values as JSON string literals when isJsonField is true', () => {
+            const result = BaseEntityHelpers.escapeValue(42, undefined, true);
+            // Should produce a SQL string literal like '42', NOT bare 42
+            expect(result).toMatch(/^'.*'$/);
+            expect(result).toContain('42');
+        });
+
+        /**
+         * Test: should wrap boolean JSON field values as JSON string literals
+         * Prevents PostgreSQL error when casting TRUE/FALSE to jsonb
+         */
+        it('should wrap boolean values as JSON string literals when isJsonField is true', () => {
+            const trueResult = BaseEntityHelpers.escapeValue(true, undefined, true);
+            const falseResult = BaseEntityHelpers.escapeValue(false, undefined, true);
+            // Should produce SQL string literals like 'true'/'false', NOT bare TRUE/FALSE
+            expect(trueResult).toMatch(/^'.*'$/);
+            expect(trueResult).toContain('true');
+            expect(falseResult).toMatch(/^'.*'$/);
+            expect(falseResult).toContain('false');
+        });
+
+        /**
+         * Test: should wrap string JSON field values as JSON string literals
+         * JSON strings need to be double-quoted inside the SQL string literal
+         */
+        it('should wrap string values as JSON string literals when isJsonField is true', () => {
+            const result = BaseEntityHelpers.escapeValue('hello', undefined, true);
+            // JSON.stringify("hello") -> '"hello"', then wrapped in SQL quotes -> '\"hello\"'
+            expect(result).toMatch(/^'.*'$/);
+            expect(result).toContain('"hello"');
+        });
+
+        /**
+         * Test: should still return NULL for null/undefined even when isJsonField is true
+         */
+        it('should return NULL for null/undefined even when isJsonField is true', () => {
+            expect(BaseEntityHelpers.escapeValue(null, undefined, true)).toBe('NULL');
+            expect(BaseEntityHelpers.escapeValue(undefined, undefined, true)).toBe('NULL');
+        });
     });
 });

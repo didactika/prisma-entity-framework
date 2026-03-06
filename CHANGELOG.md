@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-03-05
+
+### Fixed
+
+- **JSON Primitive Casting in Batch Updates**: Fixed `escapeValue()` producing invalid SQL for JSON fields with primitive values (numbers, booleans, strings). Previously, a numeric JSON value like `42` generated `42::jsonb` which PostgreSQL rejected with `ERROR: cannot cast type integer to jsonb` (code `42846`). Now primitive JSON values are routed through `escapeJsonValue()` first, producing valid SQL like `'42'::jsonb`.
+
+### Added
+
+- **Unit Tests**: Added 4 new tests for `escapeValue()` covering JSON primitive scenarios (numbers, booleans, strings, null/undefined)
+
 ## [1.1.5] - 2026-02-18
 
 ### Changed

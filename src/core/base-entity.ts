@@ -321,7 +321,7 @@ export default abstract class BaseEntity<
             throw new Error("Model is not defined in the BaseEntity class.");
         }
 
-        const typedModel = entityModel as EntityPrismaModel<TModel>;
+        const typedModel = entityModel;
 
         if (
             typeof typedModel.name !== "string" ||
