@@ -210,7 +210,10 @@ export {
     deepEqual,
     deepEqualArrays,
     deepEqualObjects,
-    hasChanges
+    hasChanges,
+    fieldHasChanged,
+    isDecimalLike,
+    numbersAreEqual
 } from './core/utils/comparison-utils';
 
 /**

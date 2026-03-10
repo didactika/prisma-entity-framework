@@ -10,8 +10,22 @@ import {
     deepEqualArrays,
     deepEqualObjects,
     hasChanges,
-    isStandardIgnoredField
+    fieldHasChanged,
+    isStandardIgnoredField,
+    isDecimalLike,
+    numbersAreEqual
 } from '../../src/core/utils/comparison-utils';
+
+function createMockDecimal(value: string) {
+    const num = Number.parseFloat(value);
+    return {
+        d: [Number.parseInt(value.replace('.', ''))],
+        e: value.includes('.') ? value.indexOf('.') - 1 : value.length - 1,
+        s: num >= 0 ? 1 : -1,
+        toNumber: () => num,
+        toString: () => value
+    };
+}
 
 describe('Comparison Utils', () => {
     describe('normalizeValue', () => {
@@ -42,7 +56,7 @@ describe('Comparison Utils', () => {
         it('should trim strings', () => {
             expect(normalizeValue('  hello  ')).toBe('hello');
             expect(normalizeValue('\thello\n')).toBe('hello');
-            expect(normalizeValue('   ')).toBe('');
+            expect(normalizeValue('   ')).toBe(null);
         });
 
         /**
@@ -700,6 +714,538 @@ describe('Comparison Utils', () => {
             expect(isStandardIgnoredField('Id')).toBe(false);
             expect(isStandardIgnoredField('CreatedAt')).toBe(false);
             expect(isStandardIgnoredField('UpdatedAt')).toBe(false);
+        });
+    });
+
+    describe('isDecimalLike', () => {
+        it('should return true for Prisma.Decimal-like objects', () => {
+            const mockDecimal = { d: [1999], e: 1, s: 1, toNumber: () => 19.99, toString: () => '19.99' };
+            expect(isDecimalLike(mockDecimal)).toBe(true);
+        });
+
+        it('should return false for plain objects', () => {
+            expect(isDecimalLike({ a: 1 })).toBe(false);
+            expect(isDecimalLike({})).toBe(false);
+        });
+
+        it('should return false for primitives', () => {
+            expect(isDecimalLike(42)).toBe(false);
+            expect(isDecimalLike('19.99')).toBe(false);
+            expect(isDecimalLike(null)).toBe(false);
+            expect(isDecimalLike(undefined)).toBe(false);
+        });
+
+        it('should return false for objects with partial Decimal interface', () => {
+            expect(isDecimalLike({ toNumber: () => 1 })).toBe(false);
+            expect(isDecimalLike({ d: [1], e: 1, s: 1 })).toBe(false);
+            expect(isDecimalLike({ toNumber: () => 1, toString: () => '1' })).toBe(false);
+        });
+
+        it('should return false for Date objects', () => {
+            expect(isDecimalLike(new Date())).toBe(false);
+        });
+
+        it('should return false for arrays', () => {
+            expect(isDecimalLike([1, 2, 3])).toBe(false);
+        });
+    });
+
+    describe('numbersAreEqual', () => {
+        it('should return true for identical numbers', () => {
+            expect(numbersAreEqual(1, 1)).toBe(true);
+            expect(numbersAreEqual(0, 0)).toBe(true);
+            expect(numbersAreEqual(-5, -5)).toBe(true);
+        });
+
+        it('should return true for float precision differences', () => {
+            // Simulates MySQL FLOAT precision loss
+            expect(numbersAreEqual(19.99, 19.990000000000002)).toBe(true);
+            expect(numbersAreEqual(0.1 + 0.2, 0.3)).toBe(true);
+            expect(numbersAreEqual(1.0000000000000002, 1)).toBe(true);
+        });
+
+        it('should return false for genuinely different numbers', () => {
+            expect(numbersAreEqual(19.99, 20.5)).toBe(false);
+            expect(numbersAreEqual(1, 2)).toBe(false);
+            expect(numbersAreEqual(0, 1)).toBe(false);
+            expect(numbersAreEqual(-1, 1)).toBe(false);
+            expect(numbersAreEqual(100, 100.01)).toBe(false);
+        });
+
+        it('should treat both NaN as equal', () => {
+            expect(numbersAreEqual(Number.NaN, Number.NaN)).toBe(true);
+        });
+
+        it('should treat NaN vs number as not equal', () => {
+            expect(numbersAreEqual(Number.NaN, 0)).toBe(false);
+            expect(numbersAreEqual(0, Number.NaN)).toBe(false);
+            expect(numbersAreEqual(Number.NaN, 1)).toBe(false);
+        });
+
+        it('should handle Infinity correctly', () => {
+            expect(numbersAreEqual(Infinity, Infinity)).toBe(true);
+            expect(numbersAreEqual(-Infinity, -Infinity)).toBe(true);
+            expect(numbersAreEqual(Infinity, -Infinity)).toBe(false);
+            expect(numbersAreEqual(Infinity, 1e308)).toBe(false);
+        });
+
+        it('should handle zero edge cases', () => {
+            expect(numbersAreEqual(0, -0)).toBe(true);
+            expect(numbersAreEqual(0, 0)).toBe(true);
+        });
+    });
+
+    describe('fieldHasChanged', () => {
+        it('should return false for identical values', () => {
+            expect(fieldHasChanged('hello', 'hello')).toBe(false);
+            expect(fieldHasChanged(42, 42)).toBe(false);
+            expect(fieldHasChanged(null, null)).toBe(false);
+        });
+
+        it('should return true for different values', () => {
+            expect(fieldHasChanged('hello', 'world')).toBe(true);
+            expect(fieldHasChanged(1, 2)).toBe(true);
+        });
+
+        it('should normalize then compare', () => {
+            expect(fieldHasChanged('  hello  ', 'hello')).toBe(false);
+            expect(fieldHasChanged('', null)).toBe(false);
+            expect(fieldHasChanged(undefined, null)).toBe(false);
+        });
+
+        it('should use epsilon for float comparison', () => {
+            expect(fieldHasChanged(19.99, 19.990000000000002)).toBe(false);
+            expect(fieldHasChanged(19.99, 20.5)).toBe(true);
+        });
+
+        it('should handle Decimal-like vs number comparison', () => {
+            const decimal = { d: [1999], e: 1, s: 1, toNumber: () => 19.99, toString: () => '19.99' };
+            // Decimal is normalized to 19.99 (number), compared with epsilon
+            expect(fieldHasChanged(19.99, decimal)).toBe(false);
+            expect(fieldHasChanged(decimal, 19.99)).toBe(false);
+            expect(fieldHasChanged(20, decimal)).toBe(true);
+        });
+
+        it('should deep compare objects', () => {
+            expect(fieldHasChanged({ a: 1 }, { a: 1 })).toBe(false);
+            expect(fieldHasChanged({ a: 1 }, { a: 2 })).toBe(true);
+        });
+
+        it('should compare Dates by timestamp', () => {
+            const d1 = new Date('2024-06-15T10:00:00Z');
+            const d2 = new Date('2024-06-15T10:00:00Z');
+            const d3 = new Date('2024-06-16T10:00:00Z');
+            expect(fieldHasChanged(d1, d2)).toBe(false);
+            expect(fieldHasChanged(d1, d3)).toBe(true);
+        });
+    });
+
+    describe('normalizeValue - Decimal/BigInt/whitespace edge cases', () => {
+        it('should normalize whitespace-only strings to null', () => {
+            expect(normalizeValue('   ')).toBe(null);
+            expect(normalizeValue('\t')).toBe(null);
+            expect(normalizeValue('\n')).toBe(null);
+            expect(normalizeValue('  \t\n  ')).toBe(null);
+        });
+
+        it('should coerce Prisma.Decimal-like objects to number', () => {
+            const mockDecimal = { d: [1999], e: 1, s: 1, toNumber: () => 19.99, toString: () => '19.99' };
+            expect(normalizeValue(mockDecimal)).toBe(19.99);
+        });
+
+        it('should coerce zero Decimal to number', () => {
+            const zeroDecimal = { d: [0], e: 0, s: 1, toNumber: () => 0, toString: () => '0' };
+            expect(normalizeValue(zeroDecimal)).toBe(0);
+        });
+
+        it('should coerce negative Decimal to number', () => {
+            const negDecimal = { d: [500], e: 2, s: -1, toNumber: () => -5, toString: () => '-5.00' };
+            expect(normalizeValue(negDecimal)).toBe(-5);
+        });
+
+        it('should coerce BigInt to number', () => {
+            expect(normalizeValue(BigInt(42))).toBe(42);
+            expect(normalizeValue(BigInt(0))).toBe(0);
+            expect(normalizeValue(BigInt(-100))).toBe(-100);
+        });
+
+        it('should not coerce regular objects', () => {
+            const obj = { a: 1, b: 2 };
+            expect(normalizeValue(obj)).toBe(obj);
+        });
+
+        it('should not coerce arrays', () => {
+            const arr = [1, 2, 3];
+            expect(normalizeValue(arr)).toBe(arr);
+        });
+
+        it('should not coerce Date objects', () => {
+            const date = new Date('2024-01-01');
+            expect(normalizeValue(date)).toBe(date);
+        });
+    });
+
+    describe('deepEqual - Date comparison', () => {
+        it('should return true for Date objects with same timestamp', () => {
+            const d1 = new Date('2024-06-15T10:00:00.000Z');
+            const d2 = new Date('2024-06-15T10:00:00.000Z');
+            expect(deepEqual(d1, d2)).toBe(true);
+        });
+
+        it('should return false for Date objects with different timestamps', () => {
+            const d1 = new Date('2024-06-15T10:00:00.000Z');
+            const d2 = new Date('2024-06-16T10:00:00.000Z');
+            expect(deepEqual(d1, d2)).toBe(false);
+        });
+
+        it('should return true for same Date reference', () => {
+            const d = new Date();
+            expect(deepEqual(d, d)).toBe(true);
+        });
+
+        it('should return false for Date vs non-Date', () => {
+            expect(deepEqual(new Date(), {})).toBe(false);
+            expect(deepEqual(new Date(), 12345)).toBe(false);
+            expect(deepEqual(new Date(), 'string')).toBe(false);
+        });
+
+        it('should compare Date objects with millisecond precision', () => {
+            const d1 = new Date('2024-06-15T10:00:00.123Z');
+            const d2 = new Date('2024-06-15T10:00:00.123Z');
+            const d3 = new Date('2024-06-15T10:00:00.124Z');
+            expect(deepEqual(d1, d2)).toBe(true);
+            expect(deepEqual(d1, d3)).toBe(false);
+        });
+    });
+
+    describe('deepEqual - Decimal-like comparison', () => {
+
+        it('should return true for Decimal objects with same value', () => {
+            const d1 = createMockDecimal('19.99');
+            const d2 = createMockDecimal('19.99');
+            expect(deepEqual(d1, d2)).toBe(true);
+        });
+
+        it('should return false for Decimal objects with different values', () => {
+            const d1 = createMockDecimal('19.99');
+            const d2 = createMockDecimal('20.00');
+            expect(deepEqual(d1, d2)).toBe(false);
+        });
+
+        it('should return true for same Decimal reference', () => {
+            const d = createMockDecimal('100.50');
+            expect(deepEqual(d, d)).toBe(true);
+        });
+
+        it('should return true for zero Decimals', () => {
+            const d1 = createMockDecimal('0');
+            const d2 = createMockDecimal('0');
+            expect(deepEqual(d1, d2)).toBe(true);
+        });
+
+        it('should handle Decimal with trailing zeros', () => {
+            const d1 = createMockDecimal('19.90');
+            const d2 = createMockDecimal('19.9');
+            // Different toString output = different (conservative)
+            expect(deepEqual(d1, d2)).toBe(false);
+        });
+    });
+
+    describe('hasChanges - Float/Decimal precision', () => {
+        it('should not detect changes for float precision differences', () => {
+            expect(hasChanges(
+                { price: 19.99 },
+                { price: 19.990000000000002 }
+            )).toBe(false);
+        });
+
+        it('should not detect changes for 0.1 + 0.2 vs 0.3', () => {
+            expect(hasChanges(
+                { value: 0.1 + 0.2 },
+                { value: 0.3 }
+            )).toBe(false);
+        });
+
+        it('should detect changes for genuinely different floats', () => {
+            expect(hasChanges(
+                { price: 19.99 },
+                { price: 20.5 }
+            )).toBe(true);
+        });
+
+        it('should not detect changes when Prisma.Decimal equals the number', () => {
+            const mockDecimal = { d: [1999], e: 1, s: 1, toNumber: () => 19.99, toString: () => '19.99' };
+            // newData has number 19.99, existingData has Decimal('19.99')
+            expect(hasChanges(
+                { price: 19.99 },
+                { price: mockDecimal }
+            )).toBe(false);
+        });
+
+        it('should not detect changes when both are Prisma.Decimal with same value', () => {
+            const d1 = { d: [1999], e: 1, s: 1, toNumber: () => 19.99, toString: () => '19.99' };
+            const d2 = { d: [1999], e: 1, s: 1, toNumber: () => 19.99, toString: () => '19.99' };
+            expect(hasChanges(
+                { price: d1 },
+                { price: d2 }
+            )).toBe(false);
+        });
+
+        it('should detect changes when Prisma.Decimal differs from number', () => {
+            const mockDecimal = { d: [1999], e: 1, s: 1, toNumber: () => 19.99, toString: () => '19.99' };
+            expect(hasChanges(
+                { price: 25 },
+                { price: mockDecimal }
+            )).toBe(true);
+        });
+
+        it('should not detect changes for integer as float', () => {
+            expect(hasChanges(
+                { value: 5 },
+                { value: 5 }
+            )).toBe(false);
+        });
+
+        it('should handle NaN fields as unchanged', () => {
+            expect(hasChanges(
+                { value: Number.NaN },
+                { value: Number.NaN }
+            )).toBe(false);
+        });
+
+        it('should handle NaN vs number as changed', () => {
+            expect(hasChanges(
+                { value: Number.NaN },
+                { value: 0 }
+            )).toBe(true);
+        });
+    });
+
+    describe('hasChanges - Date fields', () => {
+        it('should not detect changes for same Date timestamp', () => {
+            const d1 = new Date('2024-06-15T10:00:00.000Z');
+            const d2 = new Date('2024-06-15T10:00:00.000Z');
+            expect(hasChanges(
+                { scheduledFor: d1 },
+                { scheduledFor: d2 }
+            )).toBe(false);
+        });
+
+        it('should detect changes for different Date timestamp', () => {
+            const d1 = new Date('2024-06-15T10:00:00.000Z');
+            const d2 = new Date('2024-06-16T10:00:00.000Z');
+            expect(hasChanges(
+                { scheduledFor: d1 },
+                { scheduledFor: d2 }
+            )).toBe(true);
+        });
+
+        it('should still ignore createdAt and updatedAt dates', () => {
+            expect(hasChanges(
+                { createdAt: new Date('2024-01-01'), updatedAt: new Date('2024-01-01'), name: 'Test' },
+                { createdAt: new Date('2024-12-31'), updatedAt: new Date('2024-12-31'), name: 'Test' }
+            )).toBe(false);
+        });
+
+        it('should detect change when Date vs null', () => {
+            expect(hasChanges(
+                { scheduledFor: new Date('2024-06-15') },
+                { scheduledFor: null }
+            )).toBe(true);
+        });
+
+        it('should not detect change when both Date are null/undefined', () => {
+            expect(hasChanges(
+                { scheduledFor: null },
+                { scheduledFor: undefined }
+            )).toBe(false);
+        });
+    });
+
+    describe('hasChanges - JSON deep comparison', () => {
+        it('should not detect changes for identical JSON objects', () => {
+            expect(hasChanges(
+                { metadata: { key: 'value', count: 5 } },
+                { metadata: { key: 'value', count: 5 } }
+            )).toBe(false);
+        });
+
+        it('should detect changes when JSON has different values', () => {
+            expect(hasChanges(
+                { metadata: { key: 'value', count: 5 } },
+                { metadata: { key: 'value', count: 10 } }
+            )).toBe(true);
+        });
+
+        it('should detect changes when JSON has extra keys', () => {
+            expect(hasChanges(
+                { metadata: { a: 1 } },
+                { metadata: { a: 1, b: 2 } }
+            )).toBe(true);
+        });
+
+        it('should not detect changes for deeply nested identical JSON', () => {
+            const json = {
+                level1: {
+                    level2: {
+                        level3: {
+                            items: [1, 2, 3],
+                            config: { enabled: true, name: 'test' }
+                        }
+                    }
+                }
+            };
+            expect(hasChanges(
+                { settings: structuredClone(json) },
+                { settings: structuredClone(json) }
+            )).toBe(false);
+        });
+
+        it('should detect changes in deeply nested JSON', () => {
+            expect(hasChanges(
+                { settings: { database: { host: 'localhost', port: 5432 } } },
+                { settings: { database: { host: 'localhost', port: 3306 } } }
+            )).toBe(true);
+        });
+
+        it('should not detect changes for identical JSON arrays', () => {
+            expect(hasChanges(
+                { tags: ['tag1', 'tag2', 'tag3'] },
+                { tags: ['tag1', 'tag2', 'tag3'] }
+            )).toBe(false);
+        });
+
+        it('should detect changes for JSON arrays with different order', () => {
+            expect(hasChanges(
+                { tags: ['tag1', 'tag2'] },
+                { tags: ['tag2', 'tag1'] }
+            )).toBe(true);
+        });
+
+        it('should handle JSON with null values correctly', () => {
+            expect(hasChanges(
+                { metadata: { a: null, b: 'test' } },
+                { metadata: { a: null, b: 'test' } }
+            )).toBe(false);
+        });
+
+        it('should handle JSON with mixed types', () => {
+            const complex = {
+                str: 'text',
+                num: 42,
+                bool: true,
+                nil: null,
+                arr: [1, 'two', { three: 3 }],
+                nested: { deep: { value: 'found' } }
+            };
+            expect(hasChanges(
+                { metadata: structuredClone(complex) },
+                { metadata: structuredClone(complex) }
+            )).toBe(false);
+        });
+
+        it('should not detect changes for null vs null JSON fields', () => {
+            expect(hasChanges(
+                { metadata: null },
+                { metadata: null }
+            )).toBe(false);
+        });
+
+        it('should detect changes for null vs empty object JSON fields', () => {
+            expect(hasChanges(
+                { metadata: null },
+                { metadata: {} }
+            )).toBe(true);
+        });
+
+        it('should not detect changes for empty object vs empty object', () => {
+            expect(hasChanges(
+                { metadata: {} },
+                { metadata: {} }
+            )).toBe(false);
+        });
+    });
+
+    describe('hasChanges - combined field types (simulated upsert comparison)', () => {
+        it('should correctly compare a record with mixed field types - no changes', () => {
+            const decimal = { d: [2999], e: 1, s: 1, toNumber: () => 29.99, toString: () => '29.99' };
+            const date = new Date('2024-06-15T10:00:00.000Z');
+
+            // Simulates: user provides data, DB returns with Prisma types
+            const newData: Record<string, unknown> = {
+                id: 1,
+                name: 'Product A',
+                price: 29.99,
+                discount: 0.15,
+                metadata: { color: 'red', sizes: ['S', 'M', 'L'] },
+                scheduledFor: new Date('2024-06-15T10:00:00.000Z')
+            };
+
+            const existingData: Record<string, unknown> = {
+                id: 1,
+                name: 'Product A',
+                price: decimal,              // Prisma.Decimal
+                discount: 0.15,
+                metadata: { color: 'red', sizes: ['S', 'M', 'L'] },
+                scheduledFor: date,           // Date object from DB
+                createdAt: new Date('2024-01-01'),
+                updatedAt: new Date('2024-06-01')
+            };
+
+            expect(hasChanges(newData, existingData)).toBe(false);
+        });
+
+        it('should correctly compare a record with mixed field types - with changes', () => {
+            const decimal = { d: [2999], e: 1, s: 1, toNumber: () => 29.99, toString: () => '29.99' };
+
+            const newData: Record<string, unknown> = {
+                id: 1,
+                name: 'Product A Updated',   // Changed
+                price: 29.99,
+                metadata: { color: 'blue' }   // Changed
+            };
+
+            const existingData: Record<string, unknown> = {
+                id: 1,
+                name: 'Product A',
+                price: decimal,
+                metadata: { color: 'red' },
+                createdAt: new Date(),
+                updatedAt: new Date()
+            };
+
+            expect(hasChanges(newData, existingData)).toBe(true);
+        });
+
+        it('should handle upsertMany scenario - batch of items with DB-returned types', () => {
+            const items: Record<string, unknown>[] = [
+                { name: 'Item 1', price: 9.99, metadata: { tag: 'a' } },
+                { name: 'Item 2', price: 19.99, metadata: { tag: 'b' } },
+                { name: 'Item 3', price: 29.99, metadata: { tag: 'c' } }
+            ];
+
+            const existingRecords: Record<string, unknown>[] = [
+                {
+                    id: 1, name: 'Item 1',
+                    price: { d: [999], e: 0, s: 1, toNumber: () => 9.99, toString: () => '9.99' },
+                    metadata: { tag: 'a' }, createdAt: new Date(), updatedAt: new Date()
+                },
+                {
+                    id: 2, name: 'Item 2',
+                    price: { d: [1999], e: 1, s: 1, toNumber: () => 19.99, toString: () => '19.99' },
+                    metadata: { tag: 'b' }, createdAt: new Date(), updatedAt: new Date()
+                },
+                {
+                    id: 3, name: 'Item 3',
+                    price: { d: [2999], e: 1, s: 1, toNumber: () => 29.99, toString: () => '29.99' },
+                    metadata: { tag: 'DIFFERENT' }, createdAt: new Date(), updatedAt: new Date()
+                }
+            ];
+
+            // Items 0 and 1 should have no changes, item 2 has changed metadata
+            expect(hasChanges(items[0], existingRecords[0])).toBe(false);
+            expect(hasChanges(items[1], existingRecords[1])).toBe(false);
+            expect(hasChanges(items[2], existingRecords[2])).toBe(true);
         });
     });
 });

@@ -4,6 +4,12 @@
  * Provides deep equality comparison and value normalization functions.
  * Extracted from BaseEntity to eliminate code duplication and improve maintainability.
  * 
+ * Handles special types returned by Prisma:
+ * - Prisma.Decimal objects (decimal.js) — coerced to number for comparison
+ * - Date objects — compared by timestamp value, not reference
+ * - Float precision — uses relative epsilon tolerance
+ * - BigInt — coerced to number for comparison
+ * 
  * Performance optimizations:
  * - Early exits for reference equality
  * - Avoids JSON.stringify (5x slower than manual comparison)
@@ -30,7 +36,15 @@
  */
 export function normalizeValue(value: any): any {
     if (value === null || value === undefined || value === '') return null;
-    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed === '' ? null : trimmed;
+    }
+    // Coerce BigInt to number for comparison
+    if (typeof value === 'bigint') return Number(value);
+    // Detect Prisma.Decimal / decimal.js objects via duck typing
+    // These have a toNumber() method and internal 'd' array property
+    if (isDecimalLike(value)) return Number(value.toString());
     return value;
 }
 
@@ -68,6 +82,18 @@ export function deepEqual(a: any, b: any): boolean {
 
     // Primitives are already checked with ===
     if (typeA !== 'object') return false;
+
+    // Date comparison — compare by timestamp value, not reference
+    if (a instanceof Date || b instanceof Date) {
+        if (!(a instanceof Date) || !(b instanceof Date)) return false;
+        return a.getTime() === b.getTime();
+    }
+
+    // Decimal-like comparison (Prisma.Decimal / decimal.js)
+    if (isDecimalLike(a) || isDecimalLike(b)) {
+        if (!isDecimalLike(a) || !isDecimalLike(b)) return false;
+        return a.toString() === b.toString();
+    }
 
     // Array comparison
     const isArrayA = Array.isArray(a);
@@ -187,46 +213,56 @@ export function hasChanges<T extends object = Record<string, any>>(
     existingData: T,
     ignoreFields: string[] = []
 ): boolean {
-    // Build custom ignored fields set only if needed (avoid allocation overhead)
     const customIgnored = ignoreFields.length > 0 ? new Set(ignoreFields) : null;
 
     for (const key in newData) {
-        // Skip standard metadata fields (inline check is faster than Set lookup for 3 items)
         if (isStandardIgnoredField(key)) continue;
-
-        // Skip custom ignored fields if provided
         if (customIgnored?.has(key)) continue;
 
-        // Get raw values
-        const newValue = newData[key];
-        const existingValue = existingData[key];
-
-        // Fast path: exact match (same reference or primitive equality)
-        if (newValue === existingValue) continue;
-
-        // Normalize values for comparison
-        const normalizedNew = normalizeValue(newValue);
-        const normalizedExisting = normalizeValue(existingValue);
-
-        // Check after normalization
-        if (normalizedNew === normalizedExisting) continue;
-
-        // Handle null cases
-        if (normalizedNew == null || normalizedExisting == null) return true;
-
-        // Type mismatch = change
-        if (typeof normalizedNew !== typeof normalizedExisting) return true;
-
-        // Deep comparison for objects/arrays
-        if (typeof normalizedNew === 'object') {
-            if (!deepEqual(normalizedNew, normalizedExisting)) return true;
-        } else {
-            // Primitives that aren't equal = change
-            return true;
-        }
+        if (fieldHasChanged(newData[key], existingData[key])) return true;
     }
 
     return false;
+}
+
+/**
+ * Compares two field values to determine if a change occurred.
+ * Handles normalization, type coercion for Decimal/BigInt, epsilon for floats,
+ * deep equality for objects/arrays, and Date comparison by timestamp.
+ * 
+ * @param newValue - The new field value
+ * @param existingValue - The existing field value
+ * @returns true if the values represent a change
+ */
+export function fieldHasChanged(newValue: any, existingValue: any): boolean {
+    // Fast path: exact match (same reference or primitive equality)
+    if (newValue === existingValue) return false;
+
+    // Normalize values for comparison
+    const normalizedNew = normalizeValue(newValue);
+    const normalizedExisting = normalizeValue(existingValue);
+
+    // Check after normalization
+    if (normalizedNew === normalizedExisting) return false;
+
+    // Handle null cases
+    if (normalizedNew == null || normalizedExisting == null) return true;
+
+    // Type mismatch = change
+    if (typeof normalizedNew !== typeof normalizedExisting) return true;
+
+    // Numeric comparison with epsilon tolerance for float precision
+    if (typeof normalizedNew === 'number') {
+        return !numbersAreEqual(normalizedNew, normalizedExisting);
+    }
+
+    // Deep comparison for objects/arrays
+    if (typeof normalizedNew === 'object') {
+        return !deepEqual(normalizedNew, normalizedExisting);
+    }
+
+    // Primitives that aren't equal = change
+    return true;
 }
 
 /**
@@ -246,4 +282,45 @@ export function hasChanges<T extends object = Record<string, any>>(
  */
 export function isStandardIgnoredField(key: string): boolean {
     return key === 'id' || key === 'createdAt' || key === 'updatedAt';
+}
+
+/**
+ * Checks if a value is a Prisma.Decimal or decimal.js-like object.
+ * Uses duck typing to detect objects with toNumber() method and internal 'd' array,
+ * which are characteristic of the decimal.js library used by Prisma.
+ * 
+ * @param value - Value to check
+ * @returns true if value is a Decimal-like object
+ */
+export function isDecimalLike(value: any): boolean {
+    return (
+        value !== null &&
+        typeof value === 'object' &&
+        typeof value.toNumber === 'function' &&
+        typeof value.toString === 'function' &&
+        'd' in value &&
+        's' in value &&
+        'e' in value
+    );
+}
+
+/**
+ * Compares two numbers with relative epsilon tolerance.
+ * Handles float precision issues (e.g., MySQL FLOAT returning 19.989999... for 19.99).
+ * Also handles NaN (both NaN are treated as equal).
+ * 
+ * @param a - First number
+ * @param b - Second number
+ * @returns true if numbers are equal within tolerance
+ */
+export function numbersAreEqual(a: number, b: number): boolean {
+    if (a === b) return true;
+    // Both NaN → treat as equal
+    if (Number.isNaN(a) && Number.isNaN(b)) return true;
+    // One is NaN → not equal
+    if (Number.isNaN(a) || Number.isNaN(b)) return false;
+    // Infinity vs finite → not equal
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+    // Relative epsilon comparison for float precision
+    return Math.abs(a - b) <= Number.EPSILON * Math.max(1, Math.abs(a), Math.abs(b));
 }

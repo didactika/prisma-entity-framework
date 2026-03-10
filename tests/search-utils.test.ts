@@ -48,7 +48,7 @@ describe('SearchUtils', () => {
 
       const result = SearchUtils.applySearchFilter(baseFilter, searchOptions);
       expect(result).toEqual({
-        age: { gte: 18, lte: 65 },
+        age: { gte: 18, lte: 65, not: null },
       });
     });
 
@@ -97,7 +97,7 @@ describe('SearchUtils', () => {
       expect(result).toEqual({
         isActive: true,
         name: { contains: 'John' },
-        age: { gte: 18 },
+        age: { gte: 18, not: null },
       });
     });
 

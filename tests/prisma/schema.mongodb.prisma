@@ -49,9 +49,22 @@ model Product {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
   name        String
   sku         String   @unique
+  price       Float?
+  discount    Float?
   tags        Json?
   metadata    Json?
   settings    Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model Job {
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  type         String
+  status       String    @default("pending")
+  scheduledFor DateTime?
+  completedAt  DateTime?
+  payload      String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }

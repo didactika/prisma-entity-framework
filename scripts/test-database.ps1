@@ -177,9 +177,14 @@ try {
                 $script:containerStarted = $false  # Don't stop it in cleanup
                 $script:cleanupRequired = $false
             } else {
-                docker-compose up -d $Database 2>&1 | Out-Null
+                # Temporarily allow stderr output from docker-compose without throwing
+                # Docker writes progress messages (Creating, Pulling) to stderr which are not errors
+                $prevErrorAction = $ErrorActionPreference
+                $ErrorActionPreference = "Continue"
+                $dockerOutput = docker-compose up -d $Database 2>&1
+                $ErrorActionPreference = $prevErrorAction
                 if ($LASTEXITCODE -ne 0) {
-                    throw "Failed to start $Database container (exit code: $LASTEXITCODE)"
+                    throw "Failed to start $Database container (exit code: $LASTEXITCODE). Output: $dockerOutput"
                 }
                 $script:containerStarted = $true
                 $script:cleanupRequired = $true

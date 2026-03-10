@@ -54,6 +54,9 @@ model Product {
   id        Int      @id @default(autoincrement())
   name      String
   sku       String   @unique
+  price     Float?
+  discount  Float?
+  weight    Decimal? @db.Decimal(10, 2)
   tags      Json?    @default("[]")
   metadata  Json?
   settings  Json?
@@ -93,4 +96,15 @@ model AreasOnSubjects {
   @@id([areaId, subjectId])
   @@index([areaId])
   @@index([subjectId])
+}
+
+model Job {
+  id           Int       @id @default(autoincrement())
+  type         String
+  status       String    @default("pending")
+  scheduledFor DateTime?
+  completedAt  DateTime?
+  payload      String?   @db.Text
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }

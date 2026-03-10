@@ -428,6 +428,14 @@ export default class BaseEntityHelpers {
     public static escapeValue(value: any, prisma?: PrismaClient, isJsonField: boolean = false): string {
         if (value === null || value === undefined) return 'NULL';
 
+        // For JSON fields, primitive values (number, boolean, string, Date) must be
+        // serialized as JSON string literals so that PostgreSQL casts like ::jsonb work.
+        // Without this, a numeric value 42 would produce `42::jsonb` which fails with
+        // "cannot cast type integer to jsonb". The correct output is `'42'::jsonb`.
+        if (isJsonField && (typeof value !== 'object' || value instanceof Date)) {
+            return this.escapeJsonValue(value, prisma);
+        }
+
         if (typeof value === 'string') {
             const escaped = value.replace(/'/g, "''").replace(/\\/g, '\\\\');
             return `'${escaped}'`;
