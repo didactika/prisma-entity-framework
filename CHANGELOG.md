@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-03-10
+
+### Fixed
+
+- **False Positive Change Detection in Upsert (hasChanges)**: Fixed `hasChanges()` reporting changes when values were actually equal, causing unnecessary database updates. Five root-cause bugs were addressed:
+  - **Float/Decimal precision**: Prisma returns `Decimal` objects (decimal.js) from the database, which failed strict equality against plain numbers. Now coerced via `Number(value.toString())` before comparison.
+  - **Float epsilon tolerance**: Added relative epsilon comparison (`Math.abs(a - b) <= Number.EPSILON * Math.max(1, |a|, |b|)`) to handle IEEE 754 floating-point rounding differences.
+  - **Date reference equality**: `Date` objects were compared by reference instead of value. Now compared via `getTime()` timestamps.
+  - **JSON/object deep equality**: Nested JSON objects were compared by reference. `deepEqual()` now recursively compares objects, with special handling for `Date` and `Decimal` types.
+  - **BigInt coercion**: `BigInt` values are now coerced to `Number` for comparison.
+
+- **MongoDB Null Inclusion in Range Queries**: Fixed `rangeSearch` without `includeNull` returning records with null values on MongoDB. MongoDB treats null as less than any value in `lte`/`gte` comparisons (unlike SQL where NULL comparisons return NULL). Range conditions now explicitly add `not: null` to exclude null values when `includeNull` is not set.
+
+- **Multi-Database Test Infrastructure**:
+  - **Docker stderr handling**: Fixed `test-database.ps1` script failing on Docker container startup because PowerShell's `$ErrorActionPreference = "Stop"` treated Docker's stderr progress messages ("Network Creating", "Volume Creating") as terminating exceptions.
+  - **Missing Job model**: Added `Job` model to MySQL, PostgreSQL, and MongoDB Prisma schemas (was only in SQLite test schema), fixing `TypeError: Cannot read properties of undefined` in `datetime-fields` and `rangeSearch includeNull` integration tests.
+  - **Added Float/Decimal fields**: Added `price Float?`, `discount Float?`, and `weight Decimal?` fields to `Product` model across all database schemas to support float comparison integration tests.
+
+### Added
+
+- **Comparison Utilities Module** (`src/core/utils/comparison-utils.ts`): New dedicated module with extracted and improved comparison functions:
+  - `normalizeValue()` — Normalizes values for comparison (whitespace trimming, Decimal coercion, BigInt coercion)
+  - `deepEqual()` — Recursive deep equality with Date/Decimal awareness
+  - `numbersAreEqual()` — Epsilon-tolerant numeric comparison for float precision
+  - `fieldHasChanged()` — Per-field change detection with normalization pipeline
+  - `isDecimalLike()` — Duck-type detection for Prisma Decimal / decimal.js objects
+
+- **Unit Tests**: Added 129 new tests for `comparison-utils` and 23 new tests for `upsert` edge cases covering Decimal objects, float precision, Date comparisons, JSON/object deep equality, BigInt, and mixed-type scenarios.
+
+- **Integration Tests**: Added `upsert-comparison.integration.test.ts` for Float, DateTime, JSON, and batch upsert comparison scenarios.
+
 ## [1.1.7] - 2026-03-05
 
 ### Fixed

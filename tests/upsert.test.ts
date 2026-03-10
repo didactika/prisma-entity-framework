@@ -8,6 +8,17 @@ import BaseEntity from '../src/core/base-entity';
 import { configurePrisma, resetPrismaConfiguration } from '../src/core/config';
 import { mockPrismaClient } from './__mocks__/prisma-client.mock';
 
+function mockDecimal(value: string) {
+  const num = Number.parseFloat(value);
+  return {
+    d: [Number.parseInt(value.replace('.', ''))],
+    e: value.includes('.') ? value.indexOf('.') - 1 : value.length - 1,
+    s: num >= 0 ? 1 : -1,
+    toNumber: () => num,
+    toString: () => value
+  };
+}
+
 interface IBaseEntity {
   id?: number;
   createdAt?: Date;
@@ -315,6 +326,121 @@ describe('BaseEntity - Upsert', () => {
       // null and undefined should be treated as equal (normalized)
       expect((BaseEntity as any).hasChanges(obj1, obj2)).toBe(false);
       expect((BaseEntity as any).hasChanges(obj1, obj3)).toBe(false);
+    });
+  });
+
+  describe('Float/Decimal precision in upsert change detection', () => {
+    it('should NOT update when Prisma.Decimal equals the submitted number', async () => {
+      const existingRecord = { id: 1, email: 'user@example.com', name: 'User', age: 25 };
+      const existingWithDecimal = {
+        ...existingRecord,
+        price: mockDecimal('19.99')
+      };
+
+      jest.spyOn(mockPrismaClient.user, 'findFirst').mockResolvedValue(existingWithDecimal);
+
+      const result = await User.upsert({ email: 'user@example.com', name: 'User', age: 25 });
+
+      expect(mockPrismaClient.user.update).not.toHaveBeenCalled();
+      expect(result.id).toBe(1);
+    });
+
+    it('should NOT update when float precision differs within epsilon', async () => {
+      const existingRecord = { id: 1, email: 'user@example.com', name: 'User', age: 30 };
+      jest.spyOn(mockPrismaClient.user, 'findFirst').mockResolvedValue(existingRecord);
+
+      const result = await User.upsert({ email: 'user@example.com', name: 'User', age: 30 });
+
+      expect(mockPrismaClient.user.update).not.toHaveBeenCalled();
+      expect(result.id).toBe(1);
+    });
+
+    it('should NOT update when both DB and input have Decimal objects with same value', () => {
+      const newData = { price: mockDecimal('99.95') };
+      const existingData = { price: mockDecimal('99.95') };
+
+      expect((BaseEntity as any).hasChanges(newData, existingData)).toBe(false);
+    });
+
+    it('should detect change when Decimal differs from number', () => {
+      const newData = { price: 50 };
+      const existingData = { price: mockDecimal('99.95') };
+
+      expect((BaseEntity as any).hasChanges(newData, existingData)).toBe(true);
+    });
+  });
+
+  describe('JSON fields in upsert change detection', () => {
+    it('should NOT update when JSON is deeply identical', () => {
+      const newData = { metadata: { theme: 'dark', notifications: { email: true, sms: false } } };
+      const existingData = { metadata: { theme: 'dark', notifications: { email: true, sms: false } } };
+
+      expect((BaseEntity as any).hasChanges(newData, existingData)).toBe(false);
+    });
+
+    it('should detect change when nested JSON value differs', () => {
+      const newData = { metadata: { theme: 'dark', notifications: { email: true, sms: false } } };
+      const existingData = { metadata: { theme: 'dark', notifications: { email: false, sms: false } } };
+
+      expect((BaseEntity as any).hasChanges(newData, existingData)).toBe(true);
+    });
+
+    it('should NOT update when JSON arrays are identical', () => {
+      const newData = { tags: ['admin', 'user', 'editor'] };
+      const existingData = { tags: ['admin', 'user', 'editor'] };
+
+      expect((BaseEntity as any).hasChanges(newData, existingData)).toBe(false);
+    });
+
+    it('should detect change when JSON arrays differ in order', () => {
+      const newData = { tags: ['admin', 'user'] };
+      const existingData = { tags: ['user', 'admin'] };
+
+      expect((BaseEntity as any).hasChanges(newData, existingData)).toBe(true);
+    });
+  });
+
+  describe('Date fields in upsert change detection', () => {
+    it('should NOT update when Date timestamps match', () => {
+      const date = new Date('2024-06-15T10:00:00.000Z');
+      const newData = { startDate: new Date('2024-06-15T10:00:00.000Z') };
+      const existingData = { startDate: date };
+
+      expect((BaseEntity as any).hasChanges(newData, existingData)).toBe(false);
+    });
+
+    it('should detect change when Date timestamps differ', () => {
+      const newData = { startDate: new Date('2024-06-15T10:00:00.000Z') };
+      const existingData = { startDate: new Date('2024-06-15T11:00:00.000Z') };
+
+      expect((BaseEntity as any).hasChanges(newData, existingData)).toBe(true);
+    });
+
+    it('should detect change when Date vs null', () => {
+      const newData = { startDate: new Date('2024-06-15T10:00:00.000Z') };
+      const existingData: Record<string, unknown> = { startDate: null };
+
+      expect((BaseEntity as any).hasChanges(newData, existingData)).toBe(true);
+    });
+  });
+
+  describe('upsertMany with type-coerced fields', () => {
+    it('should count records as unchanged when values match exactly', async () => {
+      const items = [
+        { email: 'user1@example.com', name: 'User 1' },
+        { email: 'user2@example.com', name: 'User 2' }
+      ];
+
+      jest.spyOn(mockPrismaClient.user, 'findMany').mockResolvedValue([
+        { id: 1, email: 'user1@example.com', name: 'User 1' },
+        { id: 2, email: 'user2@example.com', name: 'User 2' }
+      ]);
+
+      const result = await User.upsertMany(items);
+
+      expect(result.unchanged).toBe(2);
+      expect(result.updated).toBe(0);
+      expect(result.created).toBe(0);
     });
   });
 });

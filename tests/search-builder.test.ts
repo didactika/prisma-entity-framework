@@ -106,7 +106,7 @@ describe('SearchBuilder', () => {
       const result = SearchBuilder.build(baseFilter, options);
 
       expect(result).toEqual({
-        age: { gte: 18, lte: 65 }
+        age: { gte: 18, lte: 65, not: null }
       });
     });
 
@@ -124,7 +124,7 @@ describe('SearchBuilder', () => {
       const result = SearchBuilder.build(baseFilter, options);
 
       expect(result).toEqual({
-        age: { gte: 18 }
+        age: { gte: 18, not: null }
       });
     });
 
@@ -142,7 +142,7 @@ describe('SearchBuilder', () => {
       const result = SearchBuilder.build(baseFilter, options);
 
       expect(result).toEqual({
-        age: { lte: 65 }
+        age: { lte: 65, not: null }
       });
     });
 
@@ -240,7 +240,7 @@ describe('SearchBuilder', () => {
       expect(result).toEqual({
         isActive: true,
         name: { contains: 'John' },
-        age: { gte: 18, lte: 65 },
+        age: { gte: 18, lte: 65, not: null },
         role: { in: ['admin', 'user'] }
       });
     });
@@ -280,8 +280,8 @@ describe('SearchBuilder', () => {
       const result = SearchBuilder.build(baseFilter, options);
 
       expect(result).toHaveProperty('OR');
-      expect(result.OR).toContainEqual({ age: { gte: 18, lte: 25 } });
-      expect(result.OR).toContainEqual({ experience: { gte: 5 } });
+      expect(result.OR).toContainEqual({ age: { gte: 18, lte: 25, not: null } });
+      expect(result.OR).toContainEqual({ experience: { gte: 5, not: null } });
     });
 
     /**
@@ -322,7 +322,7 @@ describe('SearchBuilder', () => {
 
       expect(result.isActive).toBe(true);
       expect(result.name).toEqual({ contains: 'John' });
-      expect(result.age).toEqual({ gte: 18, lte: 65 });
+      expect(result.age).toEqual({ gte: 18, lte: 65, not: null });
       expect(result.OR).toContainEqual({ email: { contains: 'gmail' } });
     });
 
@@ -381,7 +381,7 @@ describe('SearchBuilder', () => {
       const result = SearchBuilder.build(baseFilter, options);
 
       expect(result).toEqual({
-        salary: { gte: 50000 }
+        salary: { gte: 50000, not: null }
       });
       expect(result).not.toHaveProperty('age');
     });
@@ -466,7 +466,7 @@ describe('SearchBuilder', () => {
       const result = SearchBuilder.build(baseFilter, options);
 
       expect(result).toEqual({
-        createdAt: { gte: startDate, lte: endDate }
+        createdAt: { gte: startDate, lte: endDate, not: null }
       });
     });
 
@@ -524,7 +524,7 @@ describe('SearchBuilder', () => {
       });
 
       expect(result).not.toHaveProperty('OR');
-      expect(result).toHaveProperty('age', { lte: 65 });
+      expect(result).toHaveProperty('age', { lte: 65, not: null });
     });
 
     /**
@@ -539,7 +539,7 @@ describe('SearchBuilder', () => {
       });
 
       expect(result).not.toHaveProperty('OR');
-      expect(result).toHaveProperty('age', { lte: 65 });
+      expect(result).toHaveProperty('age', { lte: 65, not: null });
     });
 
     /**

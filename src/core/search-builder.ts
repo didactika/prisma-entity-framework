@@ -78,6 +78,13 @@ export default class SearchBuilder {
 
             if (!ConditionUtils.isValid(condition)) continue;
 
+            // For range conditions without includeNull, explicitly exclude nulls
+            // (MongoDB includes nulls in lte/gte comparisons unlike SQL databases)
+            const isRangeCondition = typeof condition === 'object' && condition !== null && (condition.gte !== undefined || condition.lte !== undefined);
+            if (!includeNull && isRangeCondition) {
+                condition.not = null;
+            }
+
             // If includeNull is true, create OR with condition and null
             if (includeNull && keys.length > 0) {
                 filter.OR = filter.OR ?? [];
