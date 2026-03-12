@@ -525,7 +525,7 @@ export function parseUpsertResults(
                 returnedIds.push({ id: row.id, wasInserted });
             }
 
-            const unchanged = totalItems - created - updated;
+            const unchanged = Math.max(0, totalItems - created - updated);
             return { created, updated, unchanged, returnedIds };
         }
 
@@ -537,7 +537,7 @@ export function parseUpsertResults(
             // Therefore: realUpdates = affectedRows - totalItems
             const affectedRows = rawResult as number;
             const existing = existingCount ?? 0;
-            const inserted = totalItems - existing;
+            const inserted = Math.max(0, totalItems - existing);
             const realUpdates = Math.max(0, affectedRows - totalItems);
             const unchanged = Math.max(0, existing - realUpdates);
             return { created: inserted, updated: realUpdates, unchanged };
@@ -547,7 +547,7 @@ export function parseUpsertResults(
             // $executeRawUnsafe returns changes() — inserts + true-updates (unchanged excluded by WHERE)
             const affectedRows = rawResult as number;
             const existing = existingCount ?? 0;
-            const inserted = totalItems - existing;
+            const inserted = Math.max(0, totalItems - existing);
             const realUpdates = Math.max(0, affectedRows - inserted);
             const unchanged = Math.max(0, existing - realUpdates);
             return { created: inserted, updated: realUpdates, unchanged };
@@ -571,7 +571,7 @@ export function parseUpsertResults(
                 }
             }
 
-            const unchanged = totalItems - created - updated;
+            const unchanged = Math.max(0, totalItems - created - updated);
             return { created, updated, unchanged, returnedIds };
         }
 

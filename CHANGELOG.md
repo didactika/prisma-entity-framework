@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-12
+
+### Fixed
+
+- **Negative Count Values in Upsert Results**: Fixed `parseUpsertResults` producing negative values (e.g., `-1`) for `created`, `updated`, or `unchanged` counts. This occurred when race conditions or pre-count inconsistencies caused subtraction results to go below zero. Added `Math.max(0, ...)` guards to all subtraction-based count calculations across all four database providers (PostgreSQL, MySQL, SQLite, SQL Server).
+
+## [1.1.10] - 2026-03-12
+
+### Fixed
+
+- **PostgreSQL Upsert with @@unique Constraints**: Fixed `getUniqueConstraints()` not reading `@@unique` composite constraints defined via `uniqueFields` in Prisma's runtime model. Only `uniqueIndexes` and field-level `@unique` were being read, causing PostgreSQL error `42P10: there is no unique or exclusion constraint matching the ON CONFLICT specification`. Now reads `uniqueFields` first, then `uniqueIndexes`, then `field.isUnique`, with deduplication via `Set<string>`.
+
 ## [1.1.9] - 2026-03-12
 
 ### Added
