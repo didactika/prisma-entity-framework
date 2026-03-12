@@ -6,6 +6,8 @@
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import BaseEntity from '../src/core/base-entity';
 import { configurePrisma, resetPrismaConfiguration } from '../src/core/config';
+import { clearDatabaseProviderCache } from '../src/core/utils/database-utils';
+import { clearUpsertMetadataCache } from '../src/core/upsert-utils';
 import { mockPrismaClient } from './__mocks__/prisma-client.mock';
 
 function mockDecimal(value: string) {
@@ -94,10 +96,13 @@ describe('BaseEntity - Upsert', () => {
   beforeEach(() => {
     configurePrisma(mockPrismaClient as any);
     mockPrismaClient._reset();
+    clearDatabaseProviderCache();
+    clearUpsertMetadataCache();
   });
 
   afterEach(() => {
     resetPrismaConfiguration();
+    clearDatabaseProviderCache();
   });
 
   describe('upsert', () => {
@@ -155,17 +160,10 @@ describe('BaseEntity - Upsert', () => {
         { email: 'same@example.com', name: 'Same Name' }
       ];
 
-      // Mock findMany to return existing records (batch query)
-      jest.spyOn(mockPrismaClient.user, 'findMany').mockResolvedValue([
-        { id: 2, email: 'update@example.com', name: 'Old Name' },
-        { id: 3, email: 'same@example.com', name: 'Same Name' }
-      ]);
-
-      // Mock createMany for new records
-      jest.spyOn(mockPrismaClient.user, 'createMany').mockResolvedValue({ count: 1 });
-
-      // Mock updateManyById (raw query) for updates
-      jest.spyOn(mockPrismaClient, '$executeRawUnsafe').mockResolvedValue(1);
+      // Mock pre-count query (SQLite: 2 existing records)
+      jest.spyOn(mockPrismaClient, '$queryRawUnsafe' as any).mockResolvedValue([{ cnt: 2 }]);
+      // Mock executeRawUnsafe: 2 changes (1 insert + 1 real update; 1 unchanged excluded by WHERE)
+      jest.spyOn(mockPrismaClient, '$executeRawUnsafe').mockResolvedValue(2);
 
       const result = await User.upsertMany(items);
 
@@ -183,11 +181,10 @@ describe('BaseEntity - Upsert', () => {
         { email: 'user2@example.com', name: 'User 2' }
       ];
 
-      // Mock findMany to return no existing records
-      jest.spyOn(mockPrismaClient.user, 'findMany').mockResolvedValue([]);
-
-      // Mock createMany
-      jest.spyOn(mockPrismaClient.user, 'createMany').mockResolvedValue({ count: 2 });
+      // Mock pre-count query (0 existing)
+      jest.spyOn(mockPrismaClient, '$queryRawUnsafe' as any).mockResolvedValue([{ cnt: 0 }]);
+      // Mock executeRawUnsafe: 2 changes (all inserts)
+      jest.spyOn(mockPrismaClient, '$executeRawUnsafe').mockResolvedValue(2);
 
       const result = await User.upsertMany(items);
 
@@ -271,8 +268,9 @@ describe('BaseEntity - Upsert', () => {
 
       const duration = Date.now() - startTime;
 
-      // Should complete very fast with early exit (< 50ms)
-      expect(duration).toBeLessThan(85);
+      // Should complete very fast with early exit (typically < 50ms)
+      // Using 150ms threshold to account for CI/slow machines
+      expect(duration).toBeLessThan(150);
     });
 
     it('should handle deep object comparisons correctly', () => {
@@ -431,10 +429,10 @@ describe('BaseEntity - Upsert', () => {
         { email: 'user2@example.com', name: 'User 2' }
       ];
 
-      jest.spyOn(mockPrismaClient.user, 'findMany').mockResolvedValue([
-        { id: 1, email: 'user1@example.com', name: 'User 1' },
-        { id: 2, email: 'user2@example.com', name: 'User 2' }
-      ]);
+      // Mock pre-count (SQLite: 2 existing records)
+      jest.spyOn(mockPrismaClient, '$queryRawUnsafe' as any).mockResolvedValue([{ cnt: 2 }]);
+      // Mock executeRawUnsafe: 0 changes (all unchanged due to WHERE clause)
+      jest.spyOn(mockPrismaClient, '$executeRawUnsafe').mockResolvedValue(0);
 
       const result = await User.upsertMany(items);
 

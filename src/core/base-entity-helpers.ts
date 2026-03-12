@@ -113,6 +113,18 @@ export default class BaseEntityHelpers {
             const constraintKeys: string[] = [];
 
             for (const constraintFields of constraints) {
+                // Check if item has values for all constraint fields
+                let hasAllFields = true;
+                for (const field of constraintFields) {
+                    const val = item[field];
+                    if (val === undefined || val === null) {
+                        hasAllFields = false;
+                        break;
+                    }
+                }
+                // Skip this constraint if item doesn't provide all field values
+                if (!hasAllFields) continue;
+
                 // Build key using array join (more efficient than repeated concatenation)
                 const keyParts: string[] = new Array(constraintFields.length);
                 for (let i = 0; i < constraintFields.length; i++) {

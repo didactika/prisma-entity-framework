@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.9] - 2026-03-12
+
+### Added
+
+- **Raw SQL Upsert Optimization**: `upsertMany()` now uses single-statement raw SQL (`INSERT ... ON CONFLICT`/`ON DUPLICATE KEY`/`MERGE`) for PostgreSQL, MySQL, SQLite, and SQL Server. MongoDB continues using the legacy multi-query approach. Performance improvement: from N+M queries to 1-2 queries.
+
+- **Comprehensive upsertMany Integration Tests**: Added 17 new integration tests covering all edge cases: all creates, all updates, all unchanged, mixed operations, duplicate key deduplication, large batches, null handling, timestamp behavior, and consecutive calls.
+
+### Fixed
+
+- **PostgreSQL Duplicate Key in Batch**: Fixed "ON CONFLICT DO UPDATE command cannot affect row a second time" error when multiple items share the same unique key. Items are now deduplicated before SQL generation (last-write-wins semantics).
+
+- **MySQL Unchanged Count**: Fixed incorrect `unchanged` count in MySQL upserts. Two bugs addressed:
+  - SET clause ordering: `updatedAt` conditional now evaluated FIRST (MySQL evaluates SET left-to-right)
+  - Parsing formula: Corrected for Prisma's `CLIENT_FOUND_ROWS` flag where matched-but-unchanged rows return 1
+
+- **SQLite Timestamp Precision**: Fixed `updatedAt` comparisons failing because `datetime('now')` returns second precision while Prisma stores milliseconds. Now uses `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` for millisecond precision.
+
+- **Upsert Without @unique Fields**: Models with only `@id` (no `@unique` fields) can now use upsert operations. `getUniqueConstraints()` falls back to the primary key when no unique constraints exist.
+
+- **MongoDB Duplicate Key Processing**: Fixed items with same unique key being processed multiple times in MongoDB upserts. Added deduplication with last-write-wins semantics to `upsertManyLegacy`.
+
+- **createMany Treating All Items as Duplicates**: Fixed `deduplicateByUniqueConstraints` incorrectly treating all items as duplicates when the unique constraint field (e.g., `id`) is not provided in the data. Now skips constraints where items don't provide all field values.
+
 ## [1.1.8] - 2026-03-10
 
 ### Fixed

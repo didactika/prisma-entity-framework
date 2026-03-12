@@ -1204,16 +1204,16 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         });
 
         const items = [
-          { name: 'New User', email: 'new@example.com', age: 25 }, // Will be created
-          { name: 'Updated User', email: 'existing@example.com', age: 35 }, // Will be updated
-          { name: 'Existing User', email: 'existing@example.com', age: 30 } // Will be unchanged (processed as same as previous)
+          { name: 'New User', email: 'new@example.com', age: 25 },           // Will be created
+          { name: 'Updated User', email: 'existing@example.com', age: 35 },  // Will be updated
         ];
 
         const result = await User.upsertMany(items);
 
-        expect(result.total).toBe(3);
-        expect(result.created).toBeGreaterThanOrEqual(1);
-        expect(result.updated).toBeGreaterThanOrEqual(0);
+        expect(result.total).toBe(2);
+        expect(result.created).toBe(1);
+        expect(result.updated).toBe(1);
+        expect(result.unchanged).toBe(0);
 
         // Verify in database
         const allUsers = await prisma.user.findMany();

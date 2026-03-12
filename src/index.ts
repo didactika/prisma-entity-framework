@@ -125,8 +125,36 @@ export { default as BaseEntity } from './core/base-entity';
 export { default as BaseEntityBatch } from './core/base-entity-batch';
 export { default as BaseEntityQuery } from './core/base-entity-query';
 export { default as BaseEntityHelpers } from './core/base-entity-helpers';
-export { default as ModelUtils, type JoinTableInfo } from './core/model-utils';
+export { default as ModelUtils, type JoinTableInfo, type PrismaRuntimeField } from './core/model-utils';
 export { default as DataUtils } from './core/data-utils';
+
+/**
+ * Upsert Utilities
+ * 
+ * Raw SQL upsert operations for high-performance batch upserts:
+ * - executeRawUpsertBatch: Execute raw SQL upsert with database-specific optimization
+ * - getUpsertMetadata: Extract column metadata for upsert SQL generation
+ * - buildPostgreSQLUpsert: Build PostgreSQL INSERT ON CONFLICT with IS DISTINCT FROM
+ * - buildMySQLUpsert: Build MySQL INSERT ON DUPLICATE KEY UPDATE
+ * - buildSQLiteUpsert: Build SQLite INSERT ON CONFLICT with IS NOT
+ * - buildSQLServerUpsert: Build SQL Server MERGE with EXCEPT
+ * - parseUpsertResults: Parse per-provider upsert results
+ */
+export {
+    executeRawUpsertBatch,
+    getUpsertMetadata,
+    clearUpsertMetadataCache,
+    buildPostgreSQLUpsert,
+    buildMySQLUpsert,
+    buildSQLiteUpsert,
+    buildSQLServerUpsert,
+    buildPreCountQuery,
+    parseUpsertResults,
+    type UpsertColumnMeta,
+    type UpsertMetadata,
+    type UpsertResult,
+    type RawUpsertOptions
+} from './core/upsert-utils';
 
 /**
  * Database Utilities

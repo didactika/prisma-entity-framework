@@ -15,12 +15,18 @@ export interface JoinTableInfo {
 /**
  * Prisma field information from runtime data model
  */
-interface PrismaRuntimeField {
+export interface PrismaRuntimeField {
     name: string;
     kind: 'scalar' | 'object' | 'enum';
     type: string;
     isList?: boolean;
     isUnique?: boolean;
+    isId?: boolean;
+    isUpdatedAt?: boolean;
+    isRequired?: boolean;
+    hasDefaultValue?: boolean;
+    dbName?: string | null;
+    default?: unknown;
     relationName?: string;
     relationFromFields?: string[];
 }
@@ -33,6 +39,7 @@ interface PrismaRuntimeModel {
     dbName?: string;
     schema?: string;
     fields: PrismaRuntimeField[];
+    uniqueFields?: string[][];
     uniqueIndexes?: Array<{ fields: string[] }>;
     primaryKey?: { fields: string[] };
 }
@@ -505,20 +512,39 @@ export default class ModelUtils {
         }
 
         const uniqueConstraints: string[][] = [];
+        const seen = new Set<string>();
 
-        // Get unique indexes from the model
-        if (modelMeta.uniqueIndexes && Array.isArray(modelMeta.uniqueIndexes)) {
-            for (const index of modelMeta.uniqueIndexes) {
-                if (index.fields && Array.isArray(index.fields)) {
-                    uniqueConstraints.push(index.fields);
+        const addConstraint = (fields: string[]) => {
+            const key = fields.join('|');
+            if (!seen.has(key)) {
+                seen.add(key);
+                uniqueConstraints.push(fields);
+            }
+        };
+
+        // Get composite unique constraints from uniqueFields (@@unique)
+        if (modelMeta.uniqueFields && Array.isArray(modelMeta.uniqueFields)) {
+            for (const fields of modelMeta.uniqueFields) {
+                if (Array.isArray(fields) && fields.length > 0) {
+                    addConstraint(fields);
                 }
             }
         }
 
+        // Get unique indexes from the model (@@unique with metadata)
+        if (modelMeta.uniqueIndexes && Array.isArray(modelMeta.uniqueIndexes)) {
+            for (const index of modelMeta.uniqueIndexes) {
+                if (index.fields && Array.isArray(index.fields) && index.fields.length > 0) {
+                    addConstraint(index.fields);
+                }
+            }
+        }
+
+        // Get individual @unique fields
         if (modelMeta.fields) {
             for (const field of modelMeta.fields) {
                 if (field.isUnique && field.name && field.name !== 'id') {
-                    uniqueConstraints.push([field.name]);
+                    addConstraint([field.name]);
                 }
             }
         }
@@ -529,6 +555,18 @@ export default class ModelUtils {
             const pkFields = modelMeta.primaryKey.fields;
             if (!(pkFields.length === 1 && pkFields[0] === 'id')) {
                 uniqueConstraints.push(pkFields);
+            }
+        }
+
+        // Fallback: if no unique constraints found, include the @id field.
+        // The primary key is inherently unique and usable for upsert operations
+        // when items provide explicit id values.
+        if (uniqueConstraints.length === 0) {
+            const idField = modelMeta.fields?.find(
+                (f: any) => f.isId || f.name === 'id'
+            );
+            if (idField) {
+                uniqueConstraints.push([idField.name]);
             }
         }
 

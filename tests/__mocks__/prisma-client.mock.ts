@@ -418,6 +418,7 @@ export function createMockPrismaClient() {
     comment: mockComment,
     _runtimeDataModel: mockRuntimeDataModel,
     $executeRawUnsafe: jest.fn().mockResolvedValue(1),
+    $queryRawUnsafe: jest.fn().mockResolvedValue([]),
     $queryRaw: jest.fn().mockResolvedValue([]),
     $connect: jest.fn().mockResolvedValue(undefined),
     $disconnect: jest.fn().mockResolvedValue(undefined),
