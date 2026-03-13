@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-03-13
+
+### Fixed
+
+- **Prisma Validation Error with `includeNull: true` in Date Range Search**: `rangeSearch` was generating `OR` clauses with raw `field: null` conditions for DateTime filters. In this query shape Prisma expects `field: { equals: null }`, and could throw validation errors (`Argument \`createdAt\` is missing`). The null branch is now emitted as `equals: null`.
+
+- **Prisma Validation Error with Required DateTime Fields (without `includeNull`)**: For range filters without `includeNull`, the builder always appended `not: null`. This is only valid for nullable fields and caused errors on required DateTime fields (`Argument \`not\` must not be null`). Null exclusion is now applied only when the target field is nullable.
+
+### Added
+
+- **Integration Test Coverage for Date Range Null Semantics**: Added integration tests for `findByFilter` + `rangeSearch` validating:
+  - `includeNull: true` includes both in-range dates and `NULL` values on nullable DateTime fields.
+  - Omitting `includeNull` excludes `NULL` values on nullable DateTime fields.
+  - Required DateTime range filters work without Prisma validation errors.
+
 ## [1.2.1] - 2026-03-13
 
 ### Fixed
