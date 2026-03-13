@@ -210,8 +210,24 @@ function deduplicateByUniqueKey(
     uniqueColumns: UpsertColumnMeta[]
 ): Record<string, unknown>[] {
     const seen = new Map<string, Record<string, unknown>>();
-    for (const item of items) {
-        const key = uniqueColumns.map(c => String(item[c.prismaName] ?? '\x00')).join('\x00');
+    for (let index = 0; index < items.length; index++) {
+        const item = items[index];
+        let hasAllUniqueValues = true;
+        const keyParts: string[] = [];
+
+        for (const column of uniqueColumns) {
+            const value = item[column.prismaName];
+            if (value === undefined || value === null) {
+                hasAllUniqueValues = false;
+                break;
+            }
+            keyParts.push(`${column.prismaName}:${String(value)}`);
+        }
+
+        const key = hasAllUniqueValues && keyParts.length > 0
+            ? keyParts.join('\x00')
+            : `__row_${index}`;
+
         seen.set(key, item);
     }
     return Array.from(seen.values());
@@ -243,6 +259,8 @@ export function buildPostgreSQLUpsert(
     const { updatable, comparable } = getEffectiveColumns(meta, insertCols);
 
     const colList = insertCols.map(c => q(c.dbName, prisma)).join(', ');
+    const idCol = meta.allColumns.find(c => c.isId);
+    const qId = idCol ? q(idCol.dbName, prisma) : q('id', prisma);
 
     const valueRows = items.map(item => {
         const vals = insertCols.map(col =>
@@ -252,6 +270,17 @@ export function buildPostgreSQLUpsert(
     });
 
     const conflictCols = meta.uniqueConflictColumns.map(c => q(c.dbName, prisma)).join(', ');
+
+    // Models like pure pivot tables may have no non-unique mutable columns.
+    // In that case, DO NOTHING is the correct conflict behavior.
+    if (updatable.length === 0) {
+        return [
+            `INSERT INTO ${q(meta.tableName, prisma)} (${colList})`,
+            `VALUES ${valueRows.join(', ')}`,
+            `ON CONFLICT (${conflictCols}) DO NOTHING`,
+            `RETURNING ${qId}, TRUE AS "_was_inserted"`
+        ].join('\n');
+    }
 
     const setClauses: string[] = [];
     for (const col of updatable) {
@@ -273,8 +302,6 @@ export function buildPostgreSQLUpsert(
     }
 
     // RETURNING to distinguish inserts from updates
-    const idCol = meta.allColumns.find(c => c.isId);
-    const qId = idCol ? q(idCol.dbName, prisma) : q('id', prisma);
 
     return [
         `INSERT INTO ${q(meta.tableName, prisma)} (${colList})`,
@@ -329,6 +356,15 @@ export function buildMySQLUpsert(
         setClauses.push(`${qCol} = VALUES(${qCol})`);
     }
 
+    if (setClauses.length === 0) {
+        const noOpCol = meta.uniqueConflictColumns[0] ?? insertCols[0];
+        if (!noOpCol) {
+            throw new Error(`No columns available for MySQL ON DUPLICATE KEY UPDATE in model ${meta.tableName}`);
+        }
+        const qNoOp = q(noOpCol.dbName, prisma);
+        setClauses.push(`${qNoOp} = ${qNoOp}`);
+    }
+
     return [
         `INSERT INTO ${q(meta.tableName, prisma)} (${colList})`,
         `VALUES ${valueRows.join(', ')}`,
@@ -359,6 +395,14 @@ export function buildSQLiteUpsert(
     });
 
     const conflictCols = meta.uniqueConflictColumns.map(c => q(c.dbName, prisma)).join(', ');
+
+    if (updatable.length === 0) {
+        return [
+            `INSERT INTO ${q(meta.tableName, prisma)} (${colList})`,
+            `VALUES ${valueRows.join(', ')}`,
+            `ON CONFLICT (${conflictCols}) DO NOTHING`
+        ].join('\n');
+    }
 
     const setClauses: string[] = [];
     for (const col of updatable) {
@@ -501,6 +545,65 @@ export interface UpsertResult {
     returnedIds?: Array<{ id: number | string; wasInserted: boolean }>;
 }
 
+function toSafeNonNegativeInteger(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    return Math.floor(numeric);
+}
+
+function parseInsertedFlag(value: unknown): boolean {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value === 1;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        return normalized === 't' || normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'y';
+    }
+    return false;
+}
+
+function normalizeUpsertCounts(
+    provider: DatabaseProvider,
+    counts: { created: number; updated: number; unchanged: number },
+    totalItems: number
+): { created: number; updated: number; unchanged: number } {
+    const total = toSafeNonNegativeInteger(totalItems);
+    let created = toSafeNonNegativeInteger(counts.created);
+    let updated = toSafeNonNegativeInteger(counts.updated);
+    let unchanged = toSafeNonNegativeInteger(counts.unchanged);
+
+    if (created > total) {
+        created = total;
+    }
+
+    if (created + updated > total) {
+        updated = Math.max(0, total - created);
+    }
+
+    const maxUnchanged = Math.max(0, total - created - updated);
+    if (unchanged > maxUnchanged) {
+        unchanged = maxUnchanged;
+    }
+
+    if (
+        created !== counts.created ||
+        updated !== counts.updated ||
+        unchanged !== counts.unchanged
+    ) {
+        logError(
+            'parseUpsertResults - normalized anomalous counts',
+            new Error('Upsert result counts were normalized to maintain non-negative invariants'),
+            {
+                provider,
+                totalItems: total,
+                original: counts,
+                normalized: { created, updated, unchanged }
+            }
+        );
+    }
+
+    return { created, updated, unchanged };
+}
+
 export function parseUpsertResults(
     provider: DatabaseProvider,
     rawResult: unknown,
@@ -516,7 +619,7 @@ export function parseUpsertResults(
             const returnedIds: Array<{ id: number | string; wasInserted: boolean }> = [];
 
             for (const row of rows) {
-                const wasInserted = Boolean(row._was_inserted);
+                const wasInserted = parseInsertedFlag(row._was_inserted);
                 if (wasInserted) {
                     created++;
                 } else {
@@ -525,8 +628,17 @@ export function parseUpsertResults(
                 returnedIds.push({ id: row.id, wasInserted });
             }
 
-            const unchanged = Math.max(0, totalItems - created - updated);
-            return { created, updated, unchanged, returnedIds };
+            const normalized = normalizeUpsertCounts(
+                provider,
+                {
+                    created,
+                    updated,
+                    unchanged: totalItems - created - updated,
+                },
+                totalItems
+            );
+
+            return { ...normalized, returnedIds };
         }
 
         case 'mysql': {
@@ -535,22 +647,30 @@ export function parseUpsertResults(
             //   insert=1, update(changed)=2, match(unchanged)=1
             // Total: affectedRows = totalItems + realUpdates
             // Therefore: realUpdates = affectedRows - totalItems
-            const affectedRows = rawResult as number;
-            const existing = existingCount ?? 0;
+            const affectedRows = toSafeNonNegativeInteger(rawResult);
+            const existing = toSafeNonNegativeInteger(existingCount ?? 0);
             const inserted = Math.max(0, totalItems - existing);
             const realUpdates = Math.max(0, affectedRows - totalItems);
             const unchanged = Math.max(0, existing - realUpdates);
-            return { created: inserted, updated: realUpdates, unchanged };
+            return normalizeUpsertCounts(
+                provider,
+                { created: inserted, updated: realUpdates, unchanged },
+                totalItems
+            );
         }
 
         case 'sqlite': {
             // $executeRawUnsafe returns changes() — inserts + true-updates (unchanged excluded by WHERE)
-            const affectedRows = rawResult as number;
-            const existing = existingCount ?? 0;
+            const affectedRows = toSafeNonNegativeInteger(rawResult);
+            const existing = toSafeNonNegativeInteger(existingCount ?? 0);
             const inserted = Math.max(0, totalItems - existing);
             const realUpdates = Math.max(0, affectedRows - inserted);
             const unchanged = Math.max(0, existing - realUpdates);
-            return { created: inserted, updated: realUpdates, unchanged };
+            return normalizeUpsertCounts(
+                provider,
+                { created: inserted, updated: realUpdates, unchanged },
+                totalItems
+            );
         }
 
         case 'sqlserver': {
@@ -571,8 +691,17 @@ export function parseUpsertResults(
                 }
             }
 
-            const unchanged = Math.max(0, totalItems - created - updated);
-            return { created, updated, unchanged, returnedIds };
+            const normalized = normalizeUpsertCounts(
+                provider,
+                {
+                    created,
+                    updated,
+                    unchanged: totalItems - created - updated,
+                },
+                totalItems
+            );
+
+            return { ...normalized, returnedIds };
         }
 
         default:
@@ -687,6 +816,10 @@ export async function executeRawUpsertBatch(
             new Error(`${result.errors.length} batches failed`),
             { failedCount: result.errors.length }
         );
+
+        if (result.results.length === 0) {
+            throw result.errors[0].error;
+        }
     }
 
     return {

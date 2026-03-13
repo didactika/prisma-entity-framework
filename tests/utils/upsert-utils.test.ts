@@ -286,6 +286,22 @@ describe('upsert-utils', () => {
             // Should have ON CONFLICT ("email") since email is the unique constraint
             expect(sql).toMatch(/ON CONFLICT\s*\("email"\)/);
         });
+
+        it('should use DO NOTHING when model has no updatable columns', () => {
+            const readonlyModelInfo = makeModelInfo('user', 'users', [
+                { name: 'email', type: 'String' },
+                { name: 'createdAt', type: 'DateTime', hasDefaultValue: true },
+            ]);
+
+            clearUpsertMetadataCache();
+            const readonlyMeta = getUpsertMetadata('user', readonlyModelInfo as any);
+            const items = [{ email: 'alice@example.com' }];
+            const sql = buildPostgreSQLUpsert(readonlyMeta, items, prisma);
+
+            expect(sql).toContain('ON CONFLICT ("email") DO NOTHING');
+            expect(sql).not.toContain('DO UPDATE SET');
+            expect(sql).toContain('RETURNING "id", TRUE AS "_was_inserted"');
+        });
     });
 
     // ===============================================================
@@ -411,6 +427,21 @@ describe('upsert-utils', () => {
             expect(sql).toMatch(/INSERT INTO.*\("email", "createdAt", "updatedAt"\)/);
             // Should use strftime for the missing timestamp values
             expect(sql).toContain("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')");
+        });
+
+        it('should use DO NOTHING when model has no updatable columns', () => {
+            const readonlyModelInfo = makeModelInfo('user', 'users', [
+                { name: 'email', type: 'String' },
+                { name: 'createdAt', type: 'DateTime', hasDefaultValue: true },
+            ]);
+
+            clearUpsertMetadataCache();
+            const readonlyMeta = getUpsertMetadata('user', readonlyModelInfo as any);
+            const items = [{ email: 'alice@example.com' }];
+            const sql = buildSQLiteUpsert(readonlyMeta, items, prisma);
+
+            expect(sql).toContain('ON CONFLICT ("email") DO NOTHING');
+            expect(sql).not.toContain('DO UPDATE SET');
         });
     });
 
@@ -564,6 +595,21 @@ describe('upsert-utils', () => {
                 expect(result.updated).toBe(0);
                 expect(result.unchanged).toBe(3);
             });
+
+            it('should correctly parse _was_inserted when Prisma returns string flags', () => {
+                const rawResult = [
+                    { id: 1, _was_inserted: 't' },
+                    { id: 2, _was_inserted: 'f' },
+                    { id: 3, _was_inserted: 'true' },
+                    { id: 4, _was_inserted: 'false' },
+                ];
+
+                const result = parseUpsertResults('postgresql', rawResult as any, 4);
+
+                expect(result.created).toBe(2);
+                expect(result.updated).toBe(2);
+                expect(result.unchanged).toBe(0);
+            });
         });
 
         describe('mysql', () => {
@@ -596,6 +642,14 @@ describe('upsert-utils', () => {
                 expect(result.updated).toBe(0);
                 expect(result.unchanged).toBe(3);
             });
+
+            it('should clamp anomalous counts when existing pre-count is greater than total items', () => {
+                const result = parseUpsertResults('mysql', 0, 2, 3);
+
+                expect(result.created).toBe(0);
+                expect(result.updated).toBe(0);
+                expect(result.unchanged).toBe(2);
+            });
         });
 
         describe('sqlite', () => {
@@ -614,6 +668,14 @@ describe('upsert-utils', () => {
                 expect(result.created).toBe(3);
                 expect(result.updated).toBe(0);
                 expect(result.unchanged).toBe(0);
+            });
+
+            it('should clamp anomalous counts when existing pre-count is greater than total items', () => {
+                const result = parseUpsertResults('sqlite', 0, 2, 3);
+
+                expect(result.created).toBe(0);
+                expect(result.updated).toBe(0);
+                expect(result.unchanged).toBe(2);
             });
         });
 
@@ -643,6 +705,20 @@ describe('upsert-utils', () => {
 
                 expect(result.created).toBe(2);
                 expect(result.updated).toBe(0);
+                expect(result.unchanged).toBe(0);
+            });
+
+            it('should normalize anomalous OUTPUT row counts to not exceed total', () => {
+                const rawResult = [
+                    { $action: 'UPDATE', id: 1 },
+                    { $action: 'UPDATE', id: 2 },
+                    { $action: 'UPDATE', id: 3 },
+                ];
+
+                const result = parseUpsertResults('sqlserver', rawResult, 2);
+
+                expect(result.created).toBe(0);
+                expect(result.updated).toBe(2);
                 expect(result.unchanged).toBe(0);
             });
         });
@@ -728,6 +804,29 @@ describe('upsert-utils', () => {
             expect(result.updated).toBe(1);
             expect(result.unchanged).toBe(0);
             expect(result.returnedIds).toHaveLength(2);
+        });
+
+        it('should report unchanged count when PostgreSQL RETURNING is empty', async () => {
+            clearDatabaseProviderCache();
+            const pgPrisma = {
+                ...mockPrismaClient,
+                _engineConfig: {
+                    datasources: [{ activeProvider: 'postgresql' }],
+                },
+                $queryRawUnsafe: jest.fn().mockResolvedValue([]),
+            };
+            configurePrisma(pgPrisma as any);
+
+            const items = [
+                { name: 'Alice', email: 'alice@example.com' },
+                { name: 'Bob', email: 'bob@example.com' },
+            ];
+
+            const result = await executeRawUpsertBatch('user', userModelInfo as any, items);
+
+            expect(result.created).toBe(0);
+            expect(result.updated).toBe(0);
+            expect(result.unchanged).toBe(2);
         });
     });
 

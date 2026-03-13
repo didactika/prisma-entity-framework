@@ -538,4 +538,101 @@ describe('Upsert Comparison Integration Tests', () => {
       expect(fromDb.metadata).toEqual({ version: 2 });
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Regression: unchanged counts must never be 0 when nothing actually changed
+  //
+  // Root cause: on PostgreSQL, unchanged rows are absent from RETURNING (DO NOTHING
+  // or WHERE IS DISTINCT FROM filters them out), so unchanged = total - RETURNING.length.
+  // On MySQL/SQLite, the pre-count drives the formula. Any broken SQL generation
+  // (e.g. empty SET clause for pivot-like models) caused batch failure and silent 0s.
+  // These tests cover ALL providers so any regression is caught regardless of DB.
+  // ---------------------------------------------------------------------------
+  describe('Regressions - unchanged counts (all providers)', () => {
+    it('should not return all-zero counts when all records are unchanged', async () => {
+      // This was the root bug: unchanged was 0 instead of N when nothing changed
+      await db.client.product.createMany({
+        data: [
+          { name: 'Stable 1', sku: 'REG-UNCH-001', price: 11 },
+          { name: 'Stable 2', sku: 'REG-UNCH-002', price: 22 },
+          { name: 'Stable 3', sku: 'REG-UNCH-003', price: 33 },
+        ]
+      });
+
+      const result = await Product.upsertMany([
+        { name: 'Stable 1', sku: 'REG-UNCH-001', price: 11 },
+        { name: 'Stable 2', sku: 'REG-UNCH-002', price: 22 },
+        { name: 'Stable 3', sku: 'REG-UNCH-003', price: 33 },
+      ]);
+
+      expect(result.created).toBe(0);
+      expect(result.updated).toBe(0);
+      expect(result.unchanged).toBe(3);
+      expect(result.total).toBe(3);
+      // Invariant: counts must always sum to total
+      expect(result.created + result.updated + result.unchanged).toBe(result.total);
+    });
+
+    it('should never produce negative or NaN counts', async () => {
+      await db.client.product.createMany({
+        data: [
+          { name: 'Guard 1', sku: 'REG-GUARD-001', price: 1 },
+          { name: 'Guard 2', sku: 'REG-GUARD-002', price: 2 },
+        ]
+      });
+
+      const result = await Product.upsertMany([
+        { name: 'Guard 1', sku: 'REG-GUARD-001', price: 1 },
+        { name: 'Guard 2', sku: 'REG-GUARD-002', price: 2 },
+      ]);
+
+      expect(result.created).toBeGreaterThanOrEqual(0);
+      expect(result.updated).toBeGreaterThanOrEqual(0);
+      expect(result.unchanged).toBeGreaterThanOrEqual(0);
+      expect(result.total).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(result.created)).toBe(true);
+      expect(Number.isFinite(result.updated)).toBe(true);
+      expect(Number.isFinite(result.unchanged)).toBe(true);
+    });
+
+    it('should count duplicate-key input items toward total and unchanged', async () => {
+      // Dedup reduces the SQL batch but the orignal item count should still appear in total
+      await db.client.product.create({
+        data: { name: 'Dup Stable', sku: 'REG-UNCH-DUP-001', price: 50 }
+      });
+
+      const result = await Product.upsertMany([
+        { name: 'Dup Stable', sku: 'REG-UNCH-DUP-001', price: 50 },
+        { name: 'Dup Stable', sku: 'REG-UNCH-DUP-001', price: 50 },
+      ]);
+
+      // Two items in → dedup to 1 → unchanged=1 (real) + 1 (duplicate) = 2 total
+      expect(result.total).toBe(2);
+      expect(result.created).toBe(0);
+      expect(result.updated).toBe(0);
+      expect(result.unchanged).toBe(2);
+      expect(result.created + result.updated + result.unchanged).toBe(result.total);
+    });
+
+    it('should preserve counts invariant across mixed create/update/unchanged', async () => {
+      await db.client.product.createMany({
+        data: [
+          { name: 'Keep', sku: 'REG-MIX-001', price: 10 },
+          { name: 'Change', sku: 'REG-MIX-002', price: 20 },
+        ]
+      });
+
+      const result = await Product.upsertMany([
+        { name: 'Keep', sku: 'REG-MIX-001', price: 10 },    // unchanged
+        { name: 'Changed', sku: 'REG-MIX-002', price: 99 }, // updated
+        { name: 'New', sku: 'REG-MIX-003', price: 30 },     // created
+      ]);
+
+      expect(result.created).toBe(1);
+      expect(result.updated).toBe(1);
+      expect(result.unchanged).toBe(1);
+      expect(result.total).toBe(3);
+      expect(result.created + result.updated + result.unchanged).toBe(result.total);
+    });
+  });
 });

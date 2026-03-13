@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-03-13
+
+### Fixed
+
+- **All-Zero Counts for Models Without Updatable Columns**: Models used purely as join/pivot tables (e.g., composite-key-only models with no non-key columns to update) generated an empty `DO UPDATE SET` or `ON DUPLICATE KEY UPDATE SET` clause, producing invalid SQL. Batch execution would fail silently, returning `{created:0, updated:0, unchanged:0}` regardless of the input. PostgreSQL and SQLite now use `ON CONFLICT (...) DO NOTHING` when there are no updatable columns; MySQL uses a no-op self-assignment (`col = col`) as a fallback.
+
+- **Silent Batch Failure Swallowing**: `executeRawUpsertBatch` previously caught all batch errors internally and returned zero counts when every batch in a run failed. It now re-throws the first batch error when all batches fail, making the failure visible to the caller instead of silently producing `{created:0, updated:0, unchanged:0, total:N}`.
+
+- **PostgreSQL Inserted-Flag Misparse**: The PostgreSQL driver sometimes returns the `_was_inserted` result column as the string `'t'` or `'f'` rather than a boolean. Because `Boolean('f')` evaluates to `true` in JavaScript, updates were silently miscounted as inserts. Added `parseInsertedFlag()` which explicitly normalises all truthy-string forms (`'t'`, `'true'`, `'1'`, `'y'`, `'yes'`) to `true` and everything else to `false`.
+
+- **BigInt-Safe Count Parsing**: Prisma can return `affectedRows` as a `BigInt` from MySQL and SQLite providers. Arithmetic on mixed `BigInt`/`number` values throws a `TypeError` in JavaScript. Added `toSafeNonNegativeInteger()` which converts `BigInt`, `null`, and `undefined` to a safe `number`, clamping negative results to `0`.
+
+- **Defensive Count Normalisation**: Added `normalizeUpsertCounts()` as a last-line safety check. After all provider-specific parsing, counts are clamped to non-negative values and validated against the `created + updated + unchanged === total` invariant. When a violation is detected the function corrects the values and logs an error, making anomalies visible without crashing the caller.
+
+- **Negative Count Values in Upsert Results**: Fixed `parseUpsertResults` producing negative values (e.g., `-1`) for `created`, `updated`, or `unchanged` counts. This occurred when race conditions or pre-count inconsistencies caused subtraction results to go below zero. Added `Math.max(0, ...)` guards to all subtraction-based count calculations across all four database providers (PostgreSQL, MySQL, SQLite, SQL Server).
+
 ## [1.2.0] - 2026-03-12
 
 ### Fixed
