@@ -201,6 +201,9 @@ export async function setupTestDatabase(logCapabilities = false): Promise<TestDb
         if (client.product) {
           await client.product.deleteMany({});
         }
+        if (client.taskItem) {
+          await client.taskItem.deleteMany({});
+        }
         if (client.job) {
           await client.job.deleteMany({});
         }
@@ -337,6 +340,9 @@ export async function clearTestDatabase(client: any): Promise<void> {
     await client.user.deleteMany({});
     if (client.product) {
       await client.product.deleteMany({});
+    }
+    if (client.taskItem) {
+      await client.taskItem.deleteMany({});
     }
     if (client.job) {
       await client.job.deleteMany({});

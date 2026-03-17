@@ -64,7 +64,7 @@ export function getUpsertMetadata(modelName: string, modelInfo: ModelInfo): Upse
     const jsonFields = new Set<string>();
 
     for (const field of modelInfo.fields) {
-        if (field.kind !== 'scalar') continue;
+        if (field.kind !== 'scalar' && field.kind !== 'enum') continue;
 
         const isUpdatedAt = !!(field as any).isUpdatedAt || UPDATED_AT_NAMES.has(field.name.toLowerCase());
         const isId = !!(field as any).isId || field.name === 'id';

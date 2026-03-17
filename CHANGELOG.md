@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-03-16
+
+### Fixed
+
+- **`upsertMany()` with Prisma enums (Raw SQL)**: Fixed enum columns being omitted from generated `INSERT`/`UPDATE` SQL. This could cause failures like `NOT NULL constraint failed` on required enum fields.
+
+### Added
+
+- **Enum integration tests**: Added integration coverage for enum fields across `create()`, `update()`, `upsert()`, and `upsertMany()`, including mixed batch outcomes (created/updated/unchanged).
+
 ## [1.2.2] - 2026-03-13
 
 ### Fixed

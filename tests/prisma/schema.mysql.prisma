@@ -11,6 +11,18 @@ datasource db {
   url      = env("DATABASE_URL_MYSQL")
 }
 
+enum TaskStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
 model User {
   id        Int       @id @default(autoincrement())
   name      String
@@ -107,4 +119,15 @@ model Job {
   payload      String?   @db.Text
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+}
+
+model TaskItem {
+  id          Int          @id @default(autoincrement())
+  code        String       @unique
+  title       String
+  status      TaskStatus
+  priority    TaskPriority?
+  description String?      @db.Text
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 }
