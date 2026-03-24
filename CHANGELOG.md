@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-03-24
+
+### Changed
+
+- **Raw-first `upsertMany` flow with mixed batch handling**: With `useRawQuery` enabled on SQL providers, `upsertMany()` splits work into:
+  - rows eligible for raw upsert (`INSERT ... ON CONFLICT` / `ON DUPLICATE KEY` / `MERGE`), and
+  - rows missing required non-default fields, handled in raw update-only mode when unique keys match existing rows.
+- **Hook API simplification**: Global and per-call hooks now use `before` / `after`.
+- **Final `after` payload shape**: Hook result buckets are grouped and include only IDs (not full item objects):
+  - `created: { count, items: (number | string)[] | null }`
+  - `updated: { count, items: (number | string)[] | null }`
+  - `unchanged: { count, items: (number | string)[] | null }`
+  - `total`
+- **Hook-aware performance optimization**: Classification/fetch of `created/updated/unchanged` item details is only executed when an `after` hook is configured.
+
+### Fixed
+
+- **Required-field failures in PostgreSQL raw upsert**: Rows missing required non-null fields no longer break the full raw batch before conflict resolution.
+- **Raw update-only path for existing rows**: For rows missing required fields but with resolvable unique keys, the framework now performs raw `SELECT` + raw `UPDATE` (without Prisma create/update operations) and updates only provided fields.
+- **Explicit unresolved-row failure in raw mode**: If a row is missing required fields and no existing record matches its unique key, raw mode now fails with a clear error instead of silently switching behavior.
+- **TypeScript typing in raw pre-count path**: Fixed indexing/type issues in raw query results to avoid `TS7053` and keep compile-time safety.
+
+### Added
+
+- **Regression test coverage**: Added/updated tests for:
+  - composite unique + missing required field behavior in strict raw mode,
+  - hook order and strategy metadata,
+  - `after` payload bucket structure and ID list semantics.
+
 ## [1.3.0] - 2026-03-24
 
 ### Added

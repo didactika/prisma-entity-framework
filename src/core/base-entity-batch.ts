@@ -10,7 +10,7 @@ import {
     type UpsertManyHooks,
     type UpsertManyResultSummary
 } from "./config";
-import { getDatabaseProviderCached } from "./utils/database-utils";
+import { getDatabaseProviderCached, quoteIdentifier } from "./utils/database-utils";
 import { isNonEmptyArray } from "./utils/validation-utils";
 import { getOptimalBatchSize, processBatches } from "./utils/batch-utils";
 import { logError, handleUniqueConstraintError, withErrorHandling } from "./utils/error-utils";
@@ -21,6 +21,7 @@ import { EntityPrismaModel } from "./structures/interfaces/entity.interface";
 import { executeRawUpsertBatch } from "./upsert-utils";
 
 type ModelInfo = ReturnType<typeof ModelUtils.getModelInformationCached>;
+type EntityId = number | string;
 
 type UpsertManyOptions = {
     keyTransformTemplate?: (relationName: string) => string;
@@ -396,7 +397,59 @@ export default class BaseEntityBatch {
         const provider = getDatabaseProviderCached(prisma);
         const config = getConfig();
         const resolvedUseRawQuery = options?.useRawQuery ?? config.upsertManyUseRawQuery ?? true;
-        const effectiveUseRawQuery = provider !== "mongodb" && resolvedUseRawQuery;
+        const hasAfterHook = Boolean(config.upsertManyHooks?.after || options?.hooks?.after);
+        let effectiveUseRawQuery = provider !== "mongodb" && resolvedUseRawQuery;
+        let rawEligibleItems = normalizedItems;
+        let preProcessedCreated = 0;
+        let preProcessedUpdated = 0;
+        let preProcessedUnchanged = 0;
+        const createdItemIds: Array<EntityId> | null = hasAfterHook ? [] : null;
+        const updatedItemIds: Array<EntityId> | null = hasAfterHook ? [] : null;
+        const unchangedItemIds: Array<EntityId> | null = hasAfterHook ? [] : null;
+
+        if (provider !== "mongodb" && resolvedUseRawQuery && modelInfo) {
+            const missingRequiredFields = Array.from(new Set(this.getMissingRequiredRawInsertFields(modelInfo, normalizedItems)));
+            if (missingRequiredFields.length > 0) {
+                const missingFieldSet = new Set(missingRequiredFields);
+                const missingRequiredItems: Record<string, unknown>[] = [];
+                const eligibleForRaw: Record<string, unknown>[] = [];
+
+                for (const item of normalizedItems) {
+                    const hasMissingRequired = Array.from(missingFieldSet).some(fieldName => {
+                        const value = item[fieldName];
+                        return value === undefined || value === null;
+                    });
+
+                    if (hasMissingRequired) {
+                        missingRequiredItems.push(item);
+                    } else {
+                        eligibleForRaw.push(item);
+                    }
+                }
+
+                const updateOnlyResult = await this.processMissingRequiredItemsAsUpdateOnlyRaw(
+                    prisma,
+                    modelInfo,
+                    missingRequiredItems,
+                    uniqueConstraints,
+                    hasAfterHook
+                );
+
+                preProcessedUpdated += updateOnlyResult.updated;
+                preProcessedUnchanged += updateOnlyResult.unchanged;
+                if (updatedItemIds) updatedItemIds.push(...updateOnlyResult.updatedItemIds);
+                if (unchangedItemIds) unchangedItemIds.push(...updateOnlyResult.unchangedItemIds);
+
+                if (updateOnlyResult.unresolved.length > 0) {
+                    throw new Error(
+                        `Raw upsert cannot process ${updateOnlyResult.unresolved.length} item(s) with missing required fields because no existing row matched their unique keys.`
+                    );
+                }
+
+                rawEligibleItems = eligibleForRaw;
+                effectiveUseRawQuery = rawEligibleItems.length > 0;
+            }
+        }
 
         const beforeHookPayload: UpsertManyBeforeHookPayload = {
             modelName: modelName!,
@@ -412,6 +465,7 @@ export default class BaseEntityBatch {
         let created = 0;
         let updated = 0;
         let unchanged = 0;
+        const rawHandledAllPreprocessed = provider !== "mongodb" && resolvedUseRawQuery && rawEligibleItems.length === 0;
 
         if (provider === 'mongodb') {
             // --- MongoDB: keep legacy multi-query approach ---
@@ -421,30 +475,63 @@ export default class BaseEntityBatch {
                 normalizedItems,
                 uniqueConstraints,
                 options,
-                false
+                false,
+                hasAfterHook
             );
             created = legacyResult.created;
             updated = legacyResult.updated;
             unchanged = legacyResult.unchanged;
+            if (createdItemIds) createdItemIds.push(...legacyResult.createdItemIds);
+            if (updatedItemIds) updatedItemIds.push(...legacyResult.updatedItemIds);
+            if (unchangedItemIds) unchangedItemIds.push(...legacyResult.unchangedItemIds);
+        } else if (rawHandledAllPreprocessed) {
+            // All rows were handled by raw update-only preprocessing.
         } else if (effectiveUseRawQuery) {
             // --- SQL databases: single-statement raw upsert ---
             if (!modelInfo) {
                 throw new Error(`Model information is required for raw upsert on ${provider}.`);
             }
 
-            const rawResult = await executeRawUpsertBatch(
-                modelName!,
-                modelInfo,
-                normalizedItems,
-                {
-                    parallel: options?.parallel,
-                    concurrency: options?.concurrency
-                }
-            );
+            if (rawEligibleItems.length > 0) {
+                // Only classify items when after hook needs detailed payload.
+                const rawBuckets = hasAfterHook
+                    ? await this.classifyRawEligibleItems(
+                        entityModel,
+                        rawEligibleItems,
+                        uniqueConstraints,
+                        options
+                    )
+                    : { createdItemIds: [], updatedItemIds: [], unchangedItemIds: [], createdWhereClauses: [] };
 
-            created = rawResult.created;
-            updated = rawResult.updated;
-            unchanged = rawResult.unchanged;
+                const rawResult = await executeRawUpsertBatch(
+                    modelName!,
+                    modelInfo,
+                    rawEligibleItems,
+                    {
+                        parallel: options?.parallel,
+                        concurrency: options?.concurrency
+                    }
+                );
+
+                created = rawResult.created;
+                updated = rawResult.updated;
+                unchanged = rawResult.unchanged;
+
+                if (createdItemIds) {
+                    createdItemIds.push(...rawBuckets.createdItemIds);
+                    if (rawBuckets.createdWhereClauses.length > 0) {
+                        const resolvedCreatedIds = await this.resolveIdsFromWhereClauses(
+                            entityModel,
+                            rawBuckets.createdWhereClauses,
+                            uniqueConstraints,
+                            options
+                        );
+                        createdItemIds.push(...resolvedCreatedIds);
+                    }
+                }
+                if (updatedItemIds) updatedItemIds.push(...rawBuckets.updatedItemIds);
+                if (unchangedItemIds) unchangedItemIds.push(...rawBuckets.unchangedItemIds);
+            }
         } else {
             // --- SQL databases with Prisma operations (middleware/extensions compatible) ---
             const prismaOpsResult = await this.upsertManyLegacy(
@@ -453,12 +540,20 @@ export default class BaseEntityBatch {
                 normalizedItems,
                 uniqueConstraints,
                 options,
-                true
+                true,
+                hasAfterHook
             );
             created = prismaOpsResult.created;
             updated = prismaOpsResult.updated;
             unchanged = prismaOpsResult.unchanged;
+            if (createdItemIds) createdItemIds.push(...prismaOpsResult.createdItemIds);
+            if (updatedItemIds) updatedItemIds.push(...prismaOpsResult.updatedItemIds);
+            if (unchangedItemIds) unchangedItemIds.push(...prismaOpsResult.unchangedItemIds);
         }
+
+        created += preProcessedCreated;
+        updated += preProcessedUpdated;
+        unchanged += preProcessedUnchanged;
 
         if (handleRelations && relations.size > 0 && (created > 0 || updated > 0) && provider !== 'mongodb') {
             const entityIdToIndexMap = new Map<number | string, number>();
@@ -556,24 +651,40 @@ export default class BaseEntityBatch {
             }
         }
 
-        const summary: UpsertManyResultSummary = {
+        if (hasAfterHook) {
+            const summary: UpsertManyResultSummary = {
+                created: {
+                    count: created,
+                    items: createdItemIds
+                },
+                updated: {
+                    count: updated,
+                    items: updatedItemIds
+                },
+                unchanged: {
+                    count: unchanged,
+                    items: unchangedItemIds
+                },
+                total: items.length
+            };
+
+            const afterHookPayload: UpsertManyAfterHookPayload = {
+                modelName: modelName!,
+                provider,
+                useRawQuery: effectiveUseRawQuery,
+                totalItems: items.length,
+                result: summary
+            };
+
+            await this.runAfterUpsertManyHooks(config.upsertManyHooks, options?.hooks, afterHookPayload);
+        }
+
+        return {
             created,
             updated,
             unchanged,
             total: items.length
         };
-
-        const afterHookPayload: UpsertManyAfterHookPayload = {
-            modelName: modelName!,
-            provider,
-            useRawQuery: effectiveUseRawQuery,
-            totalItems: items.length,
-            result: summary
-        };
-
-        await this.runAfterUpsertManyHooks(config.upsertManyHooks, options?.hooks, afterHookPayload);
-
-        return summary;
     }
 
     private static async runBeforeUpsertManyHooks(
@@ -581,7 +692,7 @@ export default class BaseEntityBatch {
         localHooks: UpsertManyHooks | undefined,
         payload: UpsertManyBeforeHookPayload
     ): Promise<void> {
-        const hooks = [globalHooks?.beforeUpsertMany, localHooks?.beforeUpsertMany];
+        const hooks = [globalHooks?.before, localHooks?.before];
         for (const hook of hooks) {
             if (!hook) continue;
             await hook(payload);
@@ -593,10 +704,466 @@ export default class BaseEntityBatch {
         localHooks: UpsertManyHooks | undefined,
         payload: UpsertManyAfterHookPayload
     ): Promise<void> {
-        const hooks = [globalHooks?.afterUpsertMany, localHooks?.afterUpsertMany];
+        const hooks = [globalHooks?.after, localHooks?.after];
         for (const hook of hooks) {
             if (!hook) continue;
             await hook(payload);
+        }
+    }
+
+    private static getMissingRequiredRawInsertFields(
+        modelInfo: ModelInfo,
+        items: Record<string, unknown>[]
+    ): string[] {
+        const requiredNoDefaultFields = (modelInfo.fields || [])
+            .filter((field: any) => field.kind === 'scalar' || field.kind === 'enum')
+            .filter((field: any) => {
+                const name = String(field.name ?? '');
+                const lowerName = name.toLowerCase();
+                const isId = Boolean(field.isId) || name === 'id';
+                const isCreatedAtLike = lowerName === 'createdat' || lowerName === 'created_at';
+                const isUpdatedAtLike = lowerName === 'updatedat' || lowerName === 'updated_at';
+                const isManagedTimestamp = Boolean(field.isUpdatedAt) || isCreatedAtLike || isUpdatedAtLike;
+                const hasRuntimeDefault = field.default !== undefined && field.default !== null;
+                const hasDefault = Boolean(field.hasDefaultValue) || hasRuntimeDefault || isId || isCreatedAtLike;
+                const isRequired = field.isRequired === true;
+
+                return !isId && isRequired && !hasDefault && !isManagedTimestamp;
+            })
+            .map((field: any) => String(field.name));
+
+        if (requiredNoDefaultFields.length === 0) {
+            return [];
+        }
+
+        const missing: string[] = [];
+        for (const item of items) {
+            for (const fieldName of requiredNoDefaultFields) {
+                if (item[fieldName] === undefined || item[fieldName] === null) {
+                    missing.push(fieldName);
+                }
+            }
+        }
+
+        return missing;
+    }
+
+    private static async processMissingRequiredItemsAsUpdateOnlyRaw(
+        prisma: PrismaClient,
+        modelInfo: ModelInfo,
+        items: Record<string, unknown>[],
+        uniqueConstraints: string[][],
+        collectItems: boolean
+    ): Promise<{
+        updated: number;
+        unchanged: number;
+        updatedItemIds: Array<EntityId>;
+        unchangedItemIds: Array<EntityId>;
+        unresolved: Record<string, unknown>[];
+    }> {
+        if (!isNonEmptyArray(items)) {
+            return { updated: 0, unchanged: 0, updatedItemIds: [], unchangedItemIds: [], unresolved: [] };
+        }
+
+        const matchableClauses: Record<string, unknown>[] = [];
+        const keyToItem = new Map<string, Record<string, unknown>>();
+        const unresolved: Record<string, unknown>[] = [];
+
+        for (const item of items) {
+            let hasMatchableUnique = false;
+            for (const constraint of uniqueConstraints) {
+                const whereClause: Record<string, unknown> = {};
+                let hasAllUniqueValues = true;
+                for (const field of constraint) {
+                    const value = item[field];
+                    if (value === undefined || value === null) {
+                        hasAllUniqueValues = false;
+                        break;
+                    }
+                    whereClause[field] = value;
+                }
+
+                if (hasAllUniqueValues && Object.keys(whereClause).length > 0) {
+                    matchableClauses.push(whereClause);
+                    const keyParts = constraint.map(field => `${field}:${item[field]}`);
+                    keyToItem.set(keyParts.join('|'), item);
+                    hasMatchableUnique = true;
+                    break;
+                }
+            }
+
+            if (!hasMatchableUnique) {
+                unresolved.push(item);
+            }
+        }
+
+        if (matchableClauses.length === 0) {
+            return { updated: 0, unchanged: 0, updatedItemIds: [], unchangedItemIds: [], unresolved };
+        }
+
+        let existingList: Array<Record<string, unknown> & { id: number | string }> = [];
+        if (matchableClauses.length > 0) {
+            try {
+                const fieldMap = new Map<string, string>();
+                for (const field of modelInfo.fields) {
+                    fieldMap.set(String((field as any).name), String((field as any).dbName || (field as any).name));
+                }
+
+                const selectableFields = new Set<string>(['id']);
+                for (const item of items) {
+                    for (const key of Object.keys(item)) selectableFields.add(key);
+                }
+                for (const constraint of uniqueConstraints) {
+                    for (const field of constraint) selectableFields.add(field);
+                }
+
+                const selectColumns = Array.from(selectableFields).map(field => {
+                    const dbName = fieldMap.get(field) || field;
+                    return `${quoteIdentifier(dbName, prisma)} AS ${quoteIdentifier(field, prisma)}`;
+                }).join(', ');
+
+                const whereChunks = matchableClauses.map(clause => {
+                    const parts = Object.entries(clause).map(([field, value]) => {
+                        const dbName = fieldMap.get(field) || field;
+                        const escaped = BaseEntityHelpers.escapeValue(value, prisma, false);
+                        return `${quoteIdentifier(dbName, prisma)} = ${escaped}`;
+                    });
+                    return `(${parts.join(' AND ')})`;
+                });
+
+                const tableName = quoteIdentifier((modelInfo as any).dbName || (modelInfo as any).name, prisma);
+                const sql = `SELECT ${selectColumns} FROM ${tableName} WHERE ${whereChunks.join(' OR ')}`;
+                const existing = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(sql);
+                existingList = Array.isArray(existing)
+                    ? existing.filter((row): row is Record<string, unknown> & { id: number | string } =>
+                        row !== null && typeof row === 'object' && row.id !== undefined)
+                    : [];
+            } catch (error) {
+                logError("upsertMany - fetch existing for missing-required update-only", error as Error);
+                for (const item of keyToItem.values()) {
+                    unresolved.push(item);
+                }
+                return { updated: 0, unchanged: 0, updatedItemIds: [], unchangedItemIds: [], unresolved };
+            }
+        }
+
+        const existingMap = new Map<string, Record<string, unknown> & { id: number | string }>();
+        for (const record of existingList) {
+            for (const constraint of uniqueConstraints) {
+                const keyParts: string[] = [];
+                let complete = true;
+                for (const field of constraint) {
+                    const value = (record as Record<string, unknown>)[field];
+                    if (value === undefined || value === null) {
+                        complete = false;
+                        break;
+                    }
+                    keyParts.push(`${field}:${value}`);
+                }
+                if (complete && keyParts.length > 0) {
+                    existingMap.set(keyParts.join('|'), record);
+                }
+            }
+        }
+
+        let updated = 0;
+        let unchanged = 0;
+        const updatedItemIds: Array<EntityId> = [];
+        const unchangedItemIds: Array<EntityId> = [];
+        const toUpdate: Array<{ id: number | string; data: Record<string, unknown> }> = [];
+
+        for (const [key, item] of keyToItem.entries()) {
+            const existingRecord = existingMap.get(key);
+            if (!existingRecord) {
+                unresolved.push(item);
+                continue;
+            }
+
+            if (!compareHasChanges(item, existingRecord as Record<string, unknown>)) {
+                unchanged++;
+                if (collectItems) unchangedItemIds.push(existingRecord.id);
+                continue;
+            }
+
+            toUpdate.push({ id: existingRecord.id, data: item });
+        }
+
+        if (toUpdate.length > 0) {
+            const fieldMap = new Map<string, string>();
+            for (const field of modelInfo.fields) {
+                fieldMap.set(String((field as any).name), String((field as any).dbName || (field as any).name));
+            }
+            const tableName = quoteIdentifier((modelInfo as any).dbName || (modelInfo as any).name, prisma);
+            const qId = quoteIdentifier('id', prisma);
+
+            try {
+                for (const row of toUpdate) {
+                    const setClauses: string[] = [];
+                    for (const [field, value] of Object.entries(row.data)) {
+                        if (field === 'id' || value === undefined) continue;
+                        const dbName = fieldMap.get(field) || field;
+                        const escaped = BaseEntityHelpers.escapeValue(value, prisma, false);
+                        setClauses.push(`${quoteIdentifier(dbName, prisma)} = ${escaped}`);
+                    }
+
+                    if (setClauses.length === 0) {
+                        unchanged++;
+                        continue;
+                    }
+
+                    const escapedId = BaseEntityHelpers.escapeValue(row.id, prisma, false);
+                    const sql = `UPDATE ${tableName} SET ${setClauses.join(', ')} WHERE ${qId} = ${escapedId}`;
+                    const result = await prisma.$executeRawUnsafe(sql);
+                    const affected = Number(result);
+                    if (Number.isFinite(affected) && affected > 0) {
+                        updated++;
+                        if (collectItems) updatedItemIds.push(row.id);
+                    } else {
+                        unresolved.push(row.data);
+                    }
+                }
+            } catch (error) {
+                logError("upsertMany - raw update existing missing-required items", error as Error);
+                for (const updateItem of toUpdate) {
+                    unresolved.push(updateItem.data);
+                }
+                updated = 0;
+            }
+        }
+
+        return {
+            updated,
+            unchanged,
+            updatedItemIds,
+            unchangedItemIds,
+            unresolved
+        };
+    }
+
+    private static async classifyRawEligibleItems<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
+        items: Record<string, unknown>[],
+        uniqueConstraints: string[][],
+        options?: { parallel?: boolean; concurrency?: number }
+    ): Promise<{
+        createdItemIds: Array<EntityId>;
+        updatedItemIds: Array<EntityId>;
+        unchangedItemIds: Array<EntityId>;
+        createdWhereClauses: Array<Record<string, unknown>>;
+    }> {
+        if (!isNonEmptyArray(items)) {
+            return { createdItemIds: [], updatedItemIds: [], unchangedItemIds: [], createdWhereClauses: [] };
+        }
+
+        // Deduplicate by first fully-matchable unique constraint (last-write-wins),
+        // while tracking removed duplicates as unchanged (same behavior as raw upsert counters).
+        const dedupMap = new Map<string, Record<string, unknown>>();
+        const duplicateItems: Array<Record<string, unknown>> = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            let dedupKey: string | null = null;
+
+            for (const constraint of uniqueConstraints) {
+                const keyParts: string[] = [];
+                let hasAllUnique = true;
+
+                for (const field of constraint) {
+                    const value = item[field];
+                    if (value === undefined || value === null) {
+                        hasAllUnique = false;
+                        break;
+                    }
+                    keyParts.push(`${field}:${String(value)}`);
+                }
+
+                if (hasAllUnique && keyParts.length > 0) {
+                    dedupKey = keyParts.join('|');
+                    break;
+                }
+            }
+
+            if (!dedupKey) {
+                dedupKey = `__row_${i}`;
+            }
+
+            if (dedupMap.has(dedupKey)) {
+                duplicateItems.push(dedupMap.get(dedupKey) as Record<string, unknown>);
+            }
+            dedupMap.set(dedupKey, item);
+        }
+
+        const dedupedItems = Array.from(dedupMap.values());
+        const createdItemIds: Array<EntityId> = [];
+        const updatedItemIds: Array<EntityId> = [];
+        const unchangedItemIds: Array<EntityId> = [];
+        const createdWhereClauses: Array<Record<string, unknown>> = [];
+
+        const orConditions: Record<string, unknown>[] = [];
+        const itemConstraintMap = new Map<number, Record<string, unknown>[]>();
+
+        for (let index = 0; index < dedupedItems.length; index++) {
+            const normalized = dedupedItems[index];
+            for (const constraint of uniqueConstraints) {
+                const whereClause: Record<string, unknown> = {};
+                let hasAllFields = true;
+
+                for (const field of constraint) {
+                    const value = normalized[field];
+                    if (value !== undefined && value !== null) {
+                        whereClause[field] = value;
+                    } else {
+                        hasAllFields = false;
+                        break;
+                    }
+                }
+
+                if (hasAllFields && Object.keys(whereClause).length > 0) {
+                    orConditions.push(whereClause);
+                    let constraints = itemConstraintMap.get(index);
+                    if (!constraints) {
+                        constraints = [];
+                        itemConstraintMap.set(index, constraints);
+                    }
+                    constraints.push(whereClause);
+                    break;
+                }
+            }
+        }
+
+        let existingRecords: Array<TModel & { id: number | string }> = [];
+        if (orConditions.length > 0) {
+            try {
+                const fieldsPerCondition = uniqueConstraints[0]?.length || 1;
+                const fetched = await executeWithOrBatching<TModel & { id: number | string }>(
+                    entityModel,
+                    orConditions,
+                    {
+                        parallel: options?.parallel,
+                        concurrency: options?.concurrency,
+                        fieldsPerCondition
+                    }
+                );
+                existingRecords = Array.isArray(fetched) ? fetched : [];
+            } catch (error) {
+                logError("upsertMany - classify raw items", error as Error);
+            }
+        }
+
+        const existingMap = new Map<string, TModel & { id: number | string }>();
+        for (const record of existingRecords) {
+            for (const constraint of uniqueConstraints) {
+                const keyParts: string[] = [];
+                let complete = true;
+                for (const field of constraint) {
+                    const value = (record as Record<string, unknown>)[field];
+                    if (value === undefined || value === null) {
+                        complete = false;
+                        break;
+                    }
+                    keyParts.push(`${field}:${String(value)}`);
+                }
+                if (complete && keyParts.length > 0) {
+                    existingMap.set(keyParts.join('|'), record);
+                }
+            }
+        }
+
+        for (let index = 0; index < dedupedItems.length; index++) {
+            const item = dedupedItems[index];
+            const constraints = itemConstraintMap.get(index);
+            let existingRecord: (TModel & { id: number | string }) | undefined;
+
+            if (constraints) {
+                for (const constraint of constraints) {
+                    const keys = Object.keys(constraint);
+                    const keyParts: string[] = [];
+                    for (const key of keys) {
+                        keyParts.push(`${key}:${String(constraint[key])}`);
+                    }
+                    existingRecord = existingMap.get(keyParts.join('|'));
+                    if (existingRecord) break;
+                }
+            }
+
+            if (!existingRecord) {
+                if (constraints && constraints.length > 0) {
+                    createdWhereClauses.push(constraints[0]);
+                } else {
+                    const itemId = item.id;
+                    if (itemId !== undefined && itemId !== null) {
+                        createdItemIds.push(itemId as EntityId);
+                    }
+                }
+                continue;
+            }
+
+            if (compareHasChanges(item, existingRecord as Record<string, unknown>)) {
+                updatedItemIds.push(existingRecord.id);
+            } else {
+                unchangedItemIds.push(existingRecord.id);
+            }
+        }
+
+        for (const duplicate of duplicateItems) {
+            for (const constraint of uniqueConstraints) {
+                const keyParts: string[] = [];
+                let hasAllUnique = true;
+                for (const field of constraint) {
+                    const value = duplicate[field];
+                    if (value === undefined || value === null) {
+                        hasAllUnique = false;
+                        break;
+                    }
+                    keyParts.push(`${field}:${String(value)}`);
+                }
+                if (!hasAllUnique || keyParts.length === 0) continue;
+                const existingRecord = existingMap.get(keyParts.join('|'));
+                if (existingRecord) {
+                    unchangedItemIds.push(existingRecord.id);
+                }
+                break;
+            }
+        }
+
+        return { createdItemIds, updatedItemIds, unchangedItemIds, createdWhereClauses };
+    }
+
+    private static async resolveIdsFromWhereClauses<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
+        whereClauses: Array<Record<string, unknown>>,
+        uniqueConstraints: string[][],
+        options?: { parallel?: boolean; concurrency?: number }
+    ): Promise<Array<EntityId>> {
+        if (!isNonEmptyArray(whereClauses)) {
+            return [];
+        }
+
+        try {
+            const fieldsPerCondition = uniqueConstraints[0]?.length || 1;
+            const fetched = await executeWithOrBatching<TModel & { id: EntityId }>(
+                entityModel,
+                whereClauses,
+                {
+                    parallel: options?.parallel,
+                    concurrency: options?.concurrency,
+                    fieldsPerCondition
+                }
+            );
+
+            if (!Array.isArray(fetched)) {
+                return [];
+            }
+
+            const ids: Array<EntityId> = [];
+            for (const row of fetched) {
+                if (row && row.id !== undefined && row.id !== null) {
+                    ids.push(row.id);
+                }
+            }
+            return ids;
+        } catch (error) {
+            logError("upsertMany - resolve created ids", error as Error);
+            return [];
         }
     }
 
@@ -614,8 +1181,16 @@ export default class BaseEntityBatch {
         normalizedItems: Record<string, unknown>[],
         uniqueConstraints: string[][],
         options?: { parallel?: boolean; concurrency?: number },
-        forcePrismaOperations: boolean = false
-    ): Promise<{ created: number; updated: number; unchanged: number }> {
+        forcePrismaOperations: boolean = false,
+        collectItems: boolean = false
+    ): Promise<{
+        created: number;
+        updated: number;
+        unchanged: number;
+        createdItemIds: Array<EntityId>;
+        updatedItemIds: Array<EntityId>;
+        unchangedItemIds: Array<EntityId>;
+    }> {
         // Deduplicate items by unique key (last-write-wins) to prevent
         // double-processing when the same unique key appears multiple times.
         const dedupMap = new Map<string, { index: number; item: Record<string, unknown> }>();
@@ -716,6 +1291,7 @@ export default class BaseEntityBatch {
 
         const toCreate: Record<string, unknown>[] = [];
         const toUpdate: Array<{ id: number | string; data: Record<string, unknown> }> = [];
+        const unchangedItemIds: Array<EntityId> = [];
         let unchanged = 0;
 
         for (let index = 0; index < dedupedItems.length; index++) {
@@ -739,6 +1315,7 @@ export default class BaseEntityBatch {
                     toUpdate.push({ id: existingRecord.id, data: normalized });
                 } else {
                     unchanged++;
+                    if (collectItems) unchangedItemIds.push(existingRecord.id);
                 }
             } else {
                 toCreate.push(normalized);
@@ -747,51 +1324,18 @@ export default class BaseEntityBatch {
 
         let created = 0;
         let updated = 0;
-
-        if (toCreate.length > 0) {
-            if (forcePrismaOperations) {
-                created = await withErrorHandling(
-                    async () => {
-                        let count = 0;
-                        for (const data of toCreate) {
-                            await entityModel.create({ data });
-                            count++;
-                        }
-                        return count;
-                    },
-                    "legacy individual create"
-                );
-            } else {
-                created = await withErrorHandling(
-                    async () => {
-                        const result = await entityModel.createMany({ data: toCreate });
-                        return result.count;
-                    },
-                    "legacy batch create",
-                    async () => {
-                        let count = 0;
-                        for (const data of toCreate) {
-                            try {
-                                await entityModel.create({ data });
-                                count++;
-                            } catch (err) {
-                                logError("individual create", err as Error);
-                            }
-                        }
-                        return count;
-                    }
-                );
-            }
-        }
+        const createdItemIds: Array<EntityId> = [];
+        const updatedItemIds: Array<EntityId> = [];
 
         if (toUpdate.length > 0) {
-            if (forcePrismaOperations) {
+            if (forcePrismaOperations || collectItems) {
                 updated = await withErrorHandling(
                     async () => {
                         let count = 0;
                         for (const { id, data } of toUpdate) {
                             await entityModel.update({ where: { id }, data });
                             count++;
+                            if (collectItems) updatedItemIds.push(id);
                         }
                         return count;
                     },
@@ -811,6 +1355,7 @@ export default class BaseEntityBatch {
                             try {
                                 await entityModel.update({ where: { id }, data });
                                 count++;
+                                if (collectItems) updatedItemIds.push(id);
                             } catch (err) {
                                 logError(`individual update for record ${id}`, err as Error);
                             }
@@ -821,7 +1366,56 @@ export default class BaseEntityBatch {
             }
         }
 
-        return { created, updated, unchanged: unchanged + duplicatesRemoved };
+        if (toCreate.length > 0) {
+            if (forcePrismaOperations || collectItems) {
+                created = await withErrorHandling(
+                    async () => {
+                        let count = 0;
+                        for (const data of toCreate) {
+                            const createdRecord = await entityModel.create({ data });
+                            count++;
+                            if (collectItems && createdRecord?.id !== undefined && createdRecord?.id !== null) {
+                                createdItemIds.push(createdRecord.id);
+                            }
+                        }
+                        return count;
+                    },
+                    "legacy individual create"
+                );
+            } else {
+                created = await withErrorHandling(
+                    async () => {
+                        const result = await entityModel.createMany({ data: toCreate });
+                        return result.count;
+                    },
+                    "legacy batch create",
+                    async () => {
+                        let count = 0;
+                        for (const data of toCreate) {
+                            try {
+                                const createdRecord = await entityModel.create({ data });
+                                count++;
+                                if (collectItems && createdRecord?.id !== undefined && createdRecord?.id !== null) {
+                                    createdItemIds.push(createdRecord.id);
+                                }
+                            } catch (err) {
+                                logError("individual create", err as Error);
+                            }
+                        }
+                        return count;
+                    }
+                );
+            }
+        }
+
+        return {
+            created,
+            updated,
+            unchanged: unchanged + duplicatesRemoved,
+            createdItemIds,
+            updatedItemIds,
+            unchangedItemIds
+        };
     }
 
     /**

@@ -2,10 +2,15 @@ import { PrismaClient } from '@prisma/client';
 import { RateLimiter, createRateLimiter } from './rate-limiter';
 import { getDatabaseProvider } from './utils/database-utils';
 
+export interface UpsertManyResultBucket {
+    count: number;
+    items: Array<number | string> | null;
+}
+
 export interface UpsertManyResultSummary {
-    created: number;
-    updated: number;
-    unchanged: number;
+    created: UpsertManyResultBucket;
+    updated: UpsertManyResultBucket;
+    unchanged: UpsertManyResultBucket;
     total: number;
 }
 
@@ -26,8 +31,8 @@ export interface UpsertManyAfterHookPayload extends UpsertManyHookContext {
 }
 
 export interface UpsertManyHooks {
-    beforeUpsertMany?: (payload: UpsertManyBeforeHookPayload) => void | Promise<void>;
-    afterUpsertMany?: (payload: UpsertManyAfterHookPayload) => void | Promise<void>;
+    before?: (payload: UpsertManyBeforeHookPayload) => void | Promise<void>;
+    after?: (payload: UpsertManyAfterHookPayload) => void | Promise<void>;
 }
 
 /**

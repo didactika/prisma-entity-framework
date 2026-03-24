@@ -645,11 +645,11 @@ describe('Upsert Comparison Integration Tests', () => {
       configurePrisma(db.client, {
         upsertManyUseRawQuery: true,
         upsertManyHooks: {
-          beforeUpsertMany: async (payload) => {
+          before: async (payload) => {
             callOrder.push('global-before');
             beforeStrategies.push(payload.useRawQuery);
           },
-          afterUpsertMany: async (payload) => {
+          after: async (payload) => {
             callOrder.push('global-after');
             afterStrategies.push(payload.useRawQuery);
           },
@@ -660,11 +660,11 @@ describe('Upsert Comparison Integration Tests', () => {
         [{ name: 'Hooked', sku: 'HOOK-001', price: 10 }],
         {
           hooks: {
-            beforeUpsertMany: async (payload) => {
+            before: async (payload) => {
               callOrder.push('local-before');
               beforeStrategies.push(payload.useRawQuery);
             },
-            afterUpsertMany: async (payload) => {
+            after: async (payload) => {
               callOrder.push('local-after');
               afterStrategies.push(payload.useRawQuery);
             },
@@ -692,7 +692,7 @@ describe('Upsert Comparison Integration Tests', () => {
         {
           useRawQuery: false,
           hooks: {
-            beforeUpsertMany: async (payload) => {
+            before: async (payload) => {
               observedUseRawQuery = payload.useRawQuery;
             },
           },

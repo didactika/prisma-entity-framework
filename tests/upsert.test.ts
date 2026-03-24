@@ -8,7 +8,8 @@ import BaseEntity from '../src/core/base-entity';
 import { configurePrisma, resetPrismaConfiguration } from '../src/core/config';
 import { clearDatabaseProviderCache } from '../src/core/utils/database-utils';
 import { clearUpsertMetadataCache } from '../src/core/upsert-utils';
-import { mockPrismaClient } from './__mocks__/prisma-client.mock';
+import ModelUtils from '../src/core/model-utils';
+import { createMockModel, mockPrismaClient } from './__mocks__/prisma-client.mock';
 
 function mockDecimal(value: string) {
   const num = Number.parseFloat(value);
@@ -34,6 +35,31 @@ interface IUser extends IBaseEntity {
   code?: string;
   age?: number;
 }
+
+interface ICourseState extends IBaseEntity {
+  id?: number;
+  campusId: number;
+  courseIdNumber: string;
+  userUuid: string;
+  state: string;
+  reason?: string | null;
+  role?: string;
+}
+
+const courseStateModel = createMockModel(
+  [
+    {
+      id: 1,
+      campusId: 1,
+      courseIdNumber: 'test-course-idnumber',
+      userUuid: 'studentautograder',
+      state: 'NOT_OPEN',
+      reason: null,
+      role: 'STUDENT'
+    }
+  ],
+  'courseState'
+);
 
 /**
  * Test User entity class for upsert tests
@@ -92,10 +118,31 @@ class User extends BaseEntity<IUser> {
   }
 }
 
+class CourseStateEntity extends BaseEntity<ICourseState> {
+  static override readonly model = courseStateModel as any;
+
+  static override getModelInformation() {
+    return {
+      name: 'courseState',
+      dbName: 'course_state',
+      fields: [
+        { name: 'id', dbName: 'id', kind: 'scalar' as const, type: 'Int', isId: true },
+        { name: 'campusId', dbName: 'campus_id', kind: 'scalar' as const, type: 'Int', isRequired: true },
+        { name: 'courseIdNumber', dbName: 'course_idnumber', kind: 'scalar' as const, type: 'String', isRequired: true },
+        { name: 'userUuid', dbName: 'user_uuid', kind: 'scalar' as const, type: 'String', isRequired: true },
+        { name: 'state', dbName: 'state', kind: 'enum' as const, type: 'State', isRequired: true },
+        { name: 'reason', dbName: 'reason', kind: 'enum' as const, type: 'Reason', isRequired: false },
+        { name: 'role', dbName: 'role', kind: 'scalar' as const, type: 'String', isRequired: true },
+      ]
+    };
+  }
+}
+
 describe('BaseEntity - Upsert', () => {
   beforeEach(() => {
     configurePrisma(mockPrismaClient as any);
     mockPrismaClient._reset();
+    (courseStateModel as any)._reset();
     clearDatabaseProviderCache();
     clearUpsertMetadataCache();
   });
@@ -227,8 +274,8 @@ describe('BaseEntity - Upsert', () => {
         [{ email: 'hooks@example.com', name: 'Hooks User' }],
         {
           hooks: {
-            beforeUpsertMany,
-            afterUpsertMany,
+            before: beforeUpsertMany,
+            after: afterUpsertMany,
           }
         }
       );
@@ -245,9 +292,29 @@ describe('BaseEntity - Upsert', () => {
         expect.objectContaining({
           modelName: 'user',
           totalItems: 1,
-          result: expect.objectContaining({ total: 1 })
+          result: expect.objectContaining({
+            total: 1,
+            created: expect.objectContaining({ count: expect.any(Number), items: expect.any(Array) }),
+            updated: expect.objectContaining({ count: expect.any(Number), items: expect.any(Array) }),
+            unchanged: expect.objectContaining({ count: expect.any(Number), items: expect.any(Array) })
+          })
         })
       );
+
+      const afterPayload = afterUpsertMany.mock.calls[0][0] as {
+        result: {
+          created: { items: Array<number | string> | null };
+          updated: { items: Array<number | string> | null };
+          unchanged: { items: Array<number | string> | null };
+        };
+      };
+
+      const allIds = [
+        ...(afterPayload.result.created.items ?? []),
+        ...(afterPayload.result.updated.items ?? []),
+        ...(afterPayload.result.unchanged.items ?? [])
+      ];
+      expect(allIds.every(id => typeof id === 'number' || typeof id === 'string')).toBe(true);
     });
 
     it('should use global config useRawQuery when local option is not provided', async () => {
@@ -277,8 +344,8 @@ describe('BaseEntity - Upsert', () => {
 
       configurePrisma(mockPrismaClient as any, {
         upsertManyHooks: {
-          beforeUpsertMany: async () => { callOrder.push('global-before'); },
-          afterUpsertMany: async () => { callOrder.push('global-after'); },
+          before: async () => { callOrder.push('global-before'); },
+          after: async () => { callOrder.push('global-after'); },
         },
       });
 
@@ -286,13 +353,69 @@ describe('BaseEntity - Upsert', () => {
         [{ email: 'hooks-order@example.com', name: 'Hooks Order' }],
         {
           hooks: {
-            beforeUpsertMany: async () => { callOrder.push('local-before'); },
-            afterUpsertMany: async () => { callOrder.push('local-after'); },
+            before: async () => { callOrder.push('local-before'); },
+            after: async () => { callOrder.push('local-after'); },
           }
         }
       );
 
       expect(callOrder).toEqual(['global-before', 'local-before', 'global-after', 'local-after']);
+    });
+
+    it('should fallback from raw and update existing row when required field is missing but composite unique matches', async () => {
+      const uniqueSpy = jest.spyOn(ModelUtils, 'getUniqueConstraints').mockImplementation((modelName: string) => {
+        if (modelName === 'courseState') {
+          return [['userUuid', 'courseIdNumber', 'campusId']];
+        }
+        return [['email']];
+      });
+
+      try {
+        jest.spyOn(mockPrismaClient, '$queryRawUnsafe' as any).mockImplementation(async (...args: unknown[]) => {
+          const query = String(args[0] ?? '');
+          if (/from\s+["`\[]?course_state/i.test(query)) {
+            return [
+              {
+                id: 1,
+                campusId: 1,
+                courseIdNumber: 'test-course-idnumber',
+                userUuid: 'studentautograder',
+                state: 'NOT_OPEN',
+                reason: null,
+                role: 'STUDENT'
+              }
+            ];
+          }
+          return [];
+        });
+        jest.spyOn(mockPrismaClient, '$executeRawUnsafe').mockResolvedValue(1);
+
+        const result = await CourseStateEntity.upsertMany([
+          {
+            campusId: 1,
+            courseIdNumber: 'test-course-idnumber',
+            userUuid: 'studentautograder',
+            state: 'CLOSED',
+            reason: null,
+            // role intentionally omitted (required/non-null in schema)
+          }
+        ], {
+          useRawQuery: true
+        });
+
+        expect(mockPrismaClient.$queryRawUnsafe).toHaveBeenCalled();
+        expect(mockPrismaClient.$executeRawUnsafe).toHaveBeenCalled();
+        expect((courseStateModel as any).update).not.toHaveBeenCalled();
+        expect((courseStateModel as any).create).not.toHaveBeenCalled();
+        expect(result).toEqual({
+          created: 0,
+          updated: 1,
+          unchanged: 0,
+          total: 1
+        });
+      } finally {
+        uniqueSpy.mockRestore();
+      }
     });
   });
 
