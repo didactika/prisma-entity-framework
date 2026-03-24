@@ -8,6 +8,7 @@ import BaseEntityBatch from "./base-entity-batch";
 import BaseEntityQuery from "./base-entity-query";
 import BaseEntityHelpers from "./base-entity-helpers";
 import { EntityPrismaModel } from "./structures/interfaces/entity.interface";
+import type { UpsertManyHooks } from "./config";
 
 interface BaseEntityCtor<TModel extends object> {
     new(...args: any[]): BaseEntity<TModel>;
@@ -482,6 +483,8 @@ export default abstract class BaseEntity<
             parallel?: boolean;
             concurrency?: number;
             handleRelations?: boolean;
+            useRawQuery?: boolean;
+            hooks?: UpsertManyHooks;
         }
     ): Promise<{ created: number; updated: number; unchanged: number; total: number }> {
         const entityModel = this.model;

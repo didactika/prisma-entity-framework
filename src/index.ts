@@ -26,7 +26,12 @@ export {
     getConnectionPoolSize,
     getMaxConcurrency,
     isParallelEnabled,
-    type PrismaConfig
+    type PrismaConfig,
+    type UpsertManyHooks,
+    type UpsertManyHookContext,
+    type UpsertManyBeforeHookPayload,
+    type UpsertManyAfterHookPayload,
+    type UpsertManyResultSummary
 } from './core/config';
 
 /**

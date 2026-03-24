@@ -78,6 +78,13 @@ describe('Connection Pool Configuration', () => {
             expect(() => configurePrisma(prisma, { maxQueriesPerSecond: -10 }))
                 .toThrow('maxQueriesPerSecond must be a positive number');
         });
+
+        it('should validate upsertManyUseRawQuery is boolean', () => {
+            const prisma = new PrismaClient();
+
+            expect(() => configurePrisma(prisma, { upsertManyUseRawQuery: 'yes' as any }))
+                .toThrow('upsertManyUseRawQuery must be a boolean');
+        });
         
         it('should accept valid configuration values', () => {
             const prisma = new PrismaClient();

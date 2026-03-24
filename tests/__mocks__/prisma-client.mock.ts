@@ -181,6 +181,36 @@ export const mockRuntimeDataModel = {
 export function createMockModel(data: any[], modelName: string = 'Model') {
   let dataset = [...data];
 
+  const matchesWhere = (item: Record<string, any>, where: Record<string, any>): boolean => {
+    return Object.entries(where).every(([key, value]: [string, any]) => {
+      if (key === 'OR' && Array.isArray(value)) {
+        return value.some((condition: Record<string, any>) => matchesWhere(item, condition));
+      }
+
+      if (key === 'AND' && Array.isArray(value)) {
+        return value.every((condition: Record<string, any>) => matchesWhere(item, condition));
+      }
+
+      if (value && typeof value === 'object' && 'equals' in value) {
+        return item[key] === value.equals;
+      }
+      if (value && typeof value === 'object' && 'contains' in value) {
+        return item[key]?.toLowerCase().includes(value.contains.toLowerCase());
+      }
+      if (value && typeof value === 'object' && 'gte' in value) {
+        return item[key] >= value.gte;
+      }
+      if (value && typeof value === 'object' && 'lte' in value) {
+        return item[key] <= value.lte;
+      }
+      if (value && typeof value === 'object' && 'in' in value) {
+        return value.in.includes(item[key]);
+      }
+
+      return item[key] === value;
+    });
+  };
+
   const mockModel: EntityPrismaModel<any> & { _reset: () => void } = {
     name: modelName,
 
@@ -188,26 +218,7 @@ export function createMockModel(data: any[], modelName: string = 'Model') {
       let result = [...dataset];
 
       if (args?.where) {
-        result = result.filter((item) => {
-          return Object.entries(args.where).every(([key, value]: [string, any]) => {
-            if (value && typeof value === 'object' && 'equals' in value) {
-              return item[key] === value.equals;
-            }
-            if (value && typeof value === 'object' && 'contains' in value) {
-              return item[key]?.toLowerCase().includes(value.contains.toLowerCase());
-            }
-            if (value && typeof value === 'object' && 'gte' in value) {
-              return item[key] >= value.gte;
-            }
-            if (value && typeof value === 'object' && 'lte' in value) {
-              return item[key] <= value.lte;
-            }
-            if (value && typeof value === 'object' && 'in' in value) {
-              return value.in.includes(item[key]);
-            }
-            return item[key] === value;
-          });
-        });
+        result = result.filter((item) => matchesWhere(item, args.where));
       }
 
       if (args?.skip) {
@@ -237,26 +248,7 @@ export function createMockModel(data: any[], modelName: string = 'Model') {
       let result = [...dataset];
 
       if (args?.where) {
-        result = result.filter((item) => {
-          return Object.entries(args.where).every(([key, value]: [string, any]) => {
-            if (value && typeof value === 'object' && 'equals' in value) {
-              return item[key] === value.equals;
-            }
-            if (value && typeof value === 'object' && 'contains' in value) {
-              return item[key]?.toLowerCase().includes(value.contains.toLowerCase());
-            }
-            if (value && typeof value === 'object' && 'gte' in value) {
-              return item[key] >= value.gte;
-            }
-            if (value && typeof value === 'object' && 'lte' in value) {
-              return item[key] <= value.lte;
-            }
-            if (value && typeof value === 'object' && 'in' in value) {
-              return value.in.includes(item[key]);
-            }
-            return item[key] === value;
-          });
-        });
+        result = result.filter((item) => matchesWhere(item, args.where));
       }
 
       return result.length > 0 ? result[0] : null;

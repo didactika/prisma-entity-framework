@@ -635,4 +635,103 @@ describe('Upsert Comparison Integration Tests', () => {
       expect(result.created + result.updated + result.unchanged).toBe(result.total);
     });
   });
+
+  describe('upsertMany strategy + hooks + null/undefined semantics', () => {
+    it('should execute global and local hooks with expected strategy metadata', async () => {
+      const callOrder: string[] = [];
+      const beforeStrategies: boolean[] = [];
+      const afterStrategies: boolean[] = [];
+
+      configurePrisma(db.client, {
+        upsertManyUseRawQuery: true,
+        upsertManyHooks: {
+          beforeUpsertMany: async (payload) => {
+            callOrder.push('global-before');
+            beforeStrategies.push(payload.useRawQuery);
+          },
+          afterUpsertMany: async (payload) => {
+            callOrder.push('global-after');
+            afterStrategies.push(payload.useRawQuery);
+          },
+        },
+      });
+
+      const result = await Product.upsertMany(
+        [{ name: 'Hooked', sku: 'HOOK-001', price: 10 }],
+        {
+          hooks: {
+            beforeUpsertMany: async (payload) => {
+              callOrder.push('local-before');
+              beforeStrategies.push(payload.useRawQuery);
+            },
+            afterUpsertMany: async (payload) => {
+              callOrder.push('local-after');
+              afterStrategies.push(payload.useRawQuery);
+            },
+          },
+        }
+      );
+
+      expect(result.total).toBe(1);
+      expect(callOrder).toEqual(['global-before', 'local-before', 'global-after', 'local-after']);
+
+      const expectedUseRawQuery = db.provider !== 'mongodb';
+      expect(beforeStrategies.every(v => v === expectedUseRawQuery)).toBe(true);
+      expect(afterStrategies.every(v => v === expectedUseRawQuery)).toBe(true);
+
+      // Restore default test config for isolation
+      configurePrisma(db.client);
+    });
+
+    it('should respect local useRawQuery override over global config', async () => {
+      configurePrisma(db.client, { upsertManyUseRawQuery: true });
+
+      let observedUseRawQuery: boolean | null = null;
+      await Product.upsertMany(
+        [{ name: 'Override', sku: 'OVR-001', price: 1 }],
+        {
+          useRawQuery: false,
+          hooks: {
+            beforeUpsertMany: async (payload) => {
+              observedUseRawQuery = payload.useRawQuery;
+            },
+          },
+        }
+      );
+
+      expect(observedUseRawQuery).toBe(false);
+
+      configurePrisma(db.client);
+    });
+
+    it('should preserve omitted fields and apply explicit null in the same upsertMany call', async () => {
+      await db.client.product.createMany({
+        data: [
+          { name: 'Keep Discount', sku: 'PATCH-001', price: 10, discount: 7 },
+          { name: 'Null Discount', sku: 'PATCH-002', price: 20, discount: 8 },
+        ],
+      });
+
+      await Product.upsertMany(
+        [
+          // discount omitted: must remain unchanged
+          { name: 'Keep Discount Updated', sku: 'PATCH-001', price: 11 },
+          // discount explicit null: must be set to null
+          { name: 'Null Discount Updated', sku: 'PATCH-002', price: 21, discount: null },
+        ],
+        { useRawQuery: true }
+      );
+
+      const keep = await db.client.product.findUnique({ where: { sku: 'PATCH-001' } });
+      const nulled = await db.client.product.findUnique({ where: { sku: 'PATCH-002' } });
+
+      expect(keep.name).toBe('Keep Discount Updated');
+      expect(keep.price).toBeCloseTo(11, 1);
+      expect(keep.discount).toBeCloseTo(7, 1);
+
+      expect(nulled.name).toBe('Null Discount Updated');
+      expect(nulled.price).toBeCloseTo(21, 1);
+      expect(nulled.discount).toBeNull();
+    });
+  });
 });

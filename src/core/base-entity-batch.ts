@@ -1,7 +1,15 @@
 import { PrismaClient } from "@prisma/client";
 import DataUtils from "./data-utils";
 import ModelUtils from "./model-utils";
-import { getPrismaInstance, isParallelEnabled } from "./config";
+import {
+    getConfig,
+    getPrismaInstance,
+    isParallelEnabled,
+    type UpsertManyAfterHookPayload,
+    type UpsertManyBeforeHookPayload,
+    type UpsertManyHooks,
+    type UpsertManyResultSummary
+} from "./config";
 import { getDatabaseProviderCached } from "./utils/database-utils";
 import { isNonEmptyArray } from "./utils/validation-utils";
 import { getOptimalBatchSize, processBatches } from "./utils/batch-utils";
@@ -13,6 +21,15 @@ import { EntityPrismaModel } from "./structures/interfaces/entity.interface";
 import { executeRawUpsertBatch } from "./upsert-utils";
 
 type ModelInfo = ReturnType<typeof ModelUtils.getModelInformationCached>;
+
+type UpsertManyOptions = {
+    keyTransformTemplate?: (relationName: string) => string;
+    parallel?: boolean;
+    concurrency?: number;
+    handleRelations?: boolean;
+    useRawQuery?: boolean;
+    hooks?: UpsertManyHooks;
+};
 
 /**
  * BaseEntityBatch - Helper class for batch operations.
@@ -328,12 +345,7 @@ export default class BaseEntityBatch {
             options?: { parallel?: boolean; concurrency?: number }
         ) => Promise<number>,
         items: Partial<TModel>[],
-        options?: {
-            keyTransformTemplate?: (relationName: string) => string;
-            parallel?: boolean;
-            concurrency?: number;
-            handleRelations?: boolean;
-        }
+        options?: UpsertManyOptions
     ): Promise<{ created: number; updated: number; unchanged: number; total: number }> {
         if (!entityModel) throw new Error("Model is not defined in the BaseEntity class.");
         if (!isNonEmptyArray(items)) {
@@ -382,6 +394,20 @@ export default class BaseEntityBatch {
         // ------------------------------------------------------------------
         const prisma = getPrismaInstance();
         const provider = getDatabaseProviderCached(prisma);
+        const config = getConfig();
+        const resolvedUseRawQuery = options?.useRawQuery ?? config.upsertManyUseRawQuery ?? true;
+        const effectiveUseRawQuery = provider !== "mongodb" && resolvedUseRawQuery;
+
+        const beforeHookPayload: UpsertManyBeforeHookPayload = {
+            modelName: modelName!,
+            provider,
+            useRawQuery: effectiveUseRawQuery,
+            totalItems: items.length,
+            originalItems: items as Array<Record<string, unknown>>,
+            normalizedItems
+        };
+
+        await this.runBeforeUpsertManyHooks(config.upsertManyHooks, options?.hooks, beforeHookPayload);
 
         let created = 0;
         let updated = 0;
@@ -394,12 +420,13 @@ export default class BaseEntityBatch {
                 updateManyByIdFn,
                 normalizedItems,
                 uniqueConstraints,
-                options
+                options,
+                false
             );
             created = legacyResult.created;
             updated = legacyResult.updated;
             unchanged = legacyResult.unchanged;
-        } else {
+        } else if (effectiveUseRawQuery) {
             // --- SQL databases: single-statement raw upsert ---
             if (!modelInfo) {
                 throw new Error(`Model information is required for raw upsert on ${provider}.`);
@@ -418,6 +445,19 @@ export default class BaseEntityBatch {
             created = rawResult.created;
             updated = rawResult.updated;
             unchanged = rawResult.unchanged;
+        } else {
+            // --- SQL databases with Prisma operations (middleware/extensions compatible) ---
+            const prismaOpsResult = await this.upsertManyLegacy(
+                entityModel,
+                updateManyByIdFn,
+                normalizedItems,
+                uniqueConstraints,
+                options,
+                true
+            );
+            created = prismaOpsResult.created;
+            updated = prismaOpsResult.updated;
+            unchanged = prismaOpsResult.unchanged;
         }
 
         if (handleRelations && relations.size > 0 && (created > 0 || updated > 0) && provider !== 'mongodb') {
@@ -516,12 +556,48 @@ export default class BaseEntityBatch {
             }
         }
 
-        return {
+        const summary: UpsertManyResultSummary = {
             created,
             updated,
             unchanged,
             total: items.length
         };
+
+        const afterHookPayload: UpsertManyAfterHookPayload = {
+            modelName: modelName!,
+            provider,
+            useRawQuery: effectiveUseRawQuery,
+            totalItems: items.length,
+            result: summary
+        };
+
+        await this.runAfterUpsertManyHooks(config.upsertManyHooks, options?.hooks, afterHookPayload);
+
+        return summary;
+    }
+
+    private static async runBeforeUpsertManyHooks(
+        globalHooks: UpsertManyHooks | undefined,
+        localHooks: UpsertManyHooks | undefined,
+        payload: UpsertManyBeforeHookPayload
+    ): Promise<void> {
+        const hooks = [globalHooks?.beforeUpsertMany, localHooks?.beforeUpsertMany];
+        for (const hook of hooks) {
+            if (!hook) continue;
+            await hook(payload);
+        }
+    }
+
+    private static async runAfterUpsertManyHooks(
+        globalHooks: UpsertManyHooks | undefined,
+        localHooks: UpsertManyHooks | undefined,
+        payload: UpsertManyAfterHookPayload
+    ): Promise<void> {
+        const hooks = [globalHooks?.afterUpsertMany, localHooks?.afterUpsertMany];
+        for (const hook of hooks) {
+            if (!hook) continue;
+            await hook(payload);
+        }
     }
 
     /**
@@ -537,7 +613,8 @@ export default class BaseEntityBatch {
         ) => Promise<number>,
         normalizedItems: Record<string, unknown>[],
         uniqueConstraints: string[][],
-        options?: { parallel?: boolean; concurrency?: number }
+        options?: { parallel?: boolean; concurrency?: number },
+        forcePrismaOperations: boolean = false
     ): Promise<{ created: number; updated: number; unchanged: number }> {
         // Deduplicate items by unique key (last-write-wins) to prevent
         // double-processing when the same unique key appears multiple times.
@@ -599,7 +676,7 @@ export default class BaseEntityBatch {
         if (orConditions.length > 0) {
             try {
                 const fieldsPerCondition = uniqueConstraints[0]?.length || 1;
-                existingRecords = await executeWithOrBatching<TModel & { id: number | string }>(
+                const fetched = await executeWithOrBatching<TModel & { id: number | string }>(
                     entityModel,
                     orConditions,
                     {
@@ -608,6 +685,18 @@ export default class BaseEntityBatch {
                         fieldsPerCondition
                     }
                 );
+
+                existingRecords = Array.isArray(fetched)
+                    ? fetched
+                    : [];
+
+                if (!Array.isArray(fetched)) {
+                    logError(
+                        "upsertManyLegacy - fetch existing records",
+                        new Error("Expected array of existing records"),
+                        { receivedType: typeof fetched }
+                    );
+                }
             } catch (error) {
                 logError("upsertManyLegacy - fetch existing records", error as Error);
             }
@@ -660,48 +749,76 @@ export default class BaseEntityBatch {
         let updated = 0;
 
         if (toCreate.length > 0) {
-            created = await withErrorHandling(
-                async () => {
-                    const result = await entityModel.createMany({ data: toCreate });
-                    return result.count;
-                },
-                "legacy batch create",
-                async () => {
-                    let count = 0;
-                    for (const data of toCreate) {
-                        try {
+            if (forcePrismaOperations) {
+                created = await withErrorHandling(
+                    async () => {
+                        let count = 0;
+                        for (const data of toCreate) {
                             await entityModel.create({ data });
                             count++;
-                        } catch (err) {
-                            logError("individual create", err as Error);
                         }
+                        return count;
+                    },
+                    "legacy individual create"
+                );
+            } else {
+                created = await withErrorHandling(
+                    async () => {
+                        const result = await entityModel.createMany({ data: toCreate });
+                        return result.count;
+                    },
+                    "legacy batch create",
+                    async () => {
+                        let count = 0;
+                        for (const data of toCreate) {
+                            try {
+                                await entityModel.create({ data });
+                                count++;
+                            } catch (err) {
+                                logError("individual create", err as Error);
+                            }
+                        }
+                        return count;
                     }
-                    return count;
-                }
-            );
+                );
+            }
         }
 
         if (toUpdate.length > 0) {
-            updated = await withErrorHandling(
-                async () => {
-                    const updateData: Array<Partial<TModel> & { id: number | string }> =
-                        toUpdate.map(({ id, data }) => ({ id, ...(data as TModel) }));
-                    return await updateManyByIdFn(updateData, { parallel: false });
-                },
-                "legacy batch update",
-                async () => {
-                    let count = 0;
-                    for (const { id, data } of toUpdate) {
-                        try {
+            if (forcePrismaOperations) {
+                updated = await withErrorHandling(
+                    async () => {
+                        let count = 0;
+                        for (const { id, data } of toUpdate) {
                             await entityModel.update({ where: { id }, data });
                             count++;
-                        } catch (err) {
-                            logError(`individual update for record ${id}`, err as Error);
                         }
+                        return count;
+                    },
+                    "legacy individual update"
+                );
+            } else {
+                updated = await withErrorHandling(
+                    async () => {
+                        const updateData: Array<Partial<TModel> & { id: number | string }> =
+                            toUpdate.map(({ id, data }) => ({ id, ...(data as TModel) }));
+                        return await updateManyByIdFn(updateData, { parallel: false });
+                    },
+                    "legacy batch update",
+                    async () => {
+                        let count = 0;
+                        for (const { id, data } of toUpdate) {
+                            try {
+                                await entityModel.update({ where: { id }, data });
+                                count++;
+                            } catch (err) {
+                                logError(`individual update for record ${id}`, err as Error);
+                            }
+                        }
+                        return count;
                     }
-                    return count;
-                }
-            );
+                );
+            }
         }
 
         return { created, updated, unchanged: unchanged + duplicatesRemoved };

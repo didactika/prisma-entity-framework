@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-03-24
+
+### Added
+
+- **`upsertMany` strategy selection**: Added `useRawQuery` option to choose between high-performance raw SQL (`true`) and Prisma operations (`false`).
+- **Global strategy config**: Added `upsertManyUseRawQuery` in `configurePrisma(...)` to define the default behavior for all `upsertMany()` calls.
+- **`upsertMany` lifecycle hooks**: Added `before` and `after` hooks, both globally (`upsertManyHooks`) and per-call (`options.hooks`).
+- **Integration coverage for new options**: Added tests validating strategy selection, global/local hook execution order, and null/omitted field behavior.
+
+#### Usage
+
+Use global defaults in `configurePrisma(...)`:
+
+```typescript
+configurePrisma(prisma, {
+  upsertManyUseRawQuery: true,
+  upsertManyHooks: {
+    before: async ({ data }) => {
+      // Inspect or transform payload before execution
+      return data;
+    },
+    after: async ({ result }) => {
+      // Audit or metrics after execution
+      return result;
+    }
+  }
+});
+```
+
+Override per call in `upsertMany(...)`:
+
+```typescript
+await User.upsertMany(items, {
+  useRawQuery: false, // Force Prisma operations (middleware/extensions compatible)
+  hooks: {
+    before: async ({ data }) => data,
+    after: async ({ result }) => result
+  }
+});
+```
+
+Quick guidance:
+
+- Set `useRawQuery: true` for maximum throughput on SQL providers.
+- Set `useRawQuery: false` when you need Prisma middleware/extensions to run.
+- Send `field: null` to clear a value; omit the field to keep the existing value unchanged.
+
+### Fixed
+
+- **PATCH-like semantics for raw SQL upserts**: `upsertMany()` now preserves omitted fields instead of accidentally overwriting them in mixed-shape batches when raw SQL is used.
+- **Explicit `null` handling in upserts**: Explicitly provided `null` values are preserved as intentional updates, while omitted (`undefined`/missing) fields are not updated.
+
 ## [1.2.3] - 2026-03-16
 
 ### Fixed

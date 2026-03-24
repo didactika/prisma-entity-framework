@@ -221,7 +221,10 @@ function deduplicateByUniqueKey(
                 hasAllUniqueValues = false;
                 break;
             }
-            keyParts.push(`${column.prismaName}:${String(value)}`);
+            const serializedValue = typeof value === 'object'
+                ? JSON.stringify(value)
+                : String(value);
+            keyParts.push(`${column.prismaName}:${serializedValue}`);
         }
 
         const key = hasAllUniqueValues && keyParts.length > 0
@@ -740,6 +743,33 @@ function buildUpsertSQL(
 export interface RawUpsertOptions {
     parallel?: boolean;
     concurrency?: number;
+    /**
+     * When true (default), splits items by field signature before building raw SQL
+     * so omitted fields in one row never overwrite existing values due to other rows
+     * in the same batch that include that field.
+     */
+    patchSafeRaw?: boolean;
+}
+
+function getFieldSignature(item: Record<string, unknown>): string {
+    const keys = Object.keys(item).sort((a, b) => a.localeCompare(b));
+    return keys.join('\x1f');
+}
+
+function groupByFieldSignature(items: Record<string, unknown>[]): Record<string, unknown>[][] {
+    const groups = new Map<string, Record<string, unknown>[]>();
+
+    for (const item of items) {
+        const signature = getFieldSignature(item);
+        const existing = groups.get(signature);
+        if (existing) {
+            existing.push(item);
+        } else {
+            groups.set(signature, [item]);
+        }
+    }
+
+    return Array.from(groups.values());
 }
 
 export async function executeRawUpsertBatch(
@@ -760,40 +790,50 @@ export async function executeRawUpsertBatch(
     const batchSize = getOptimalBatchSize('createMany', provider);
     const needsPreCount = provider === 'mysql' || provider === 'sqlite';
     const usesQueryRaw = provider === 'postgresql' || provider === 'sqlserver';
+    const patchSafeRaw = options?.patchSafeRaw !== false;
+    const itemGroups = patchSafeRaw ? groupByFieldSignature(dedupedItems) : [dedupedItems];
 
-    const result = await processBatches(
-        dedupedItems,
-        batchSize,
-        async (batch): Promise<UpsertResult> => {
-            return await withErrorHandling<UpsertResult>(
-                async () => {
-                    let existingCount: number | undefined;
+    const allBatchResults: UpsertResult[] = [];
+    const allBatchErrors: Array<{ error: Error }> = [];
 
-                    if (needsPreCount) {
-                        const countQuery = buildPreCountQuery(meta, batch, prisma);
-                        const countResult = await (prisma as any).$queryRawUnsafe(countQuery);
-                        existingCount = Number(countResult?.[0]?.cnt ?? 0);
-                    }
+    for (const group of itemGroups) {
+        const groupResult = await processBatches(
+            group,
+            batchSize,
+            async (batch): Promise<UpsertResult> => {
+                return await withErrorHandling<UpsertResult>(
+                    async () => {
+                        let existingCount: number | undefined;
 
-                    const sql = buildUpsertSQL(provider, meta, batch, prisma);
+                        if (needsPreCount) {
+                            const countQuery = buildPreCountQuery(meta, batch, prisma);
+                            const countResult = await prisma.$queryRawUnsafe(countQuery);
+                            existingCount = Number(countResult?.[0]?.cnt ?? 0);
+                        }
 
-                    let rawResult: unknown;
-                    if (usesQueryRaw) {
-                        rawResult = await (prisma as any).$queryRawUnsafe(sql);
-                    } else {
-                        rawResult = await (prisma as any).$executeRawUnsafe(sql);
-                    }
+                        const sql = buildUpsertSQL(provider, meta, batch, prisma);
 
-                    return parseUpsertResults(provider, rawResult, batch.length, existingCount);
-                },
-                "raw upsert batch"
-            );
-        },
-        {
-            parallel: options?.parallel !== false,
-            concurrency: options?.concurrency
-        }
-    );
+                        let rawResult: unknown;
+                        if (usesQueryRaw) {
+                            rawResult = await prisma.$queryRawUnsafe(sql);
+                        } else {
+                            rawResult = await prisma.$executeRawUnsafe(sql);
+                        }
+
+                        return parseUpsertResults(provider, rawResult, batch.length, existingCount);
+                    },
+                    "raw upsert batch"
+                );
+            },
+            {
+                parallel: options?.parallel !== false,
+                concurrency: options?.concurrency
+            }
+        );
+
+        allBatchResults.push(...groupResult.results);
+        allBatchErrors.push(...groupResult.errors.map(e => ({ error: e.error })));
+    }
 
     // Aggregate batch results
     let totalCreated = 0;
@@ -801,7 +841,7 @@ export async function executeRawUpsertBatch(
     let totalUnchanged = 0;
     const allReturnedIds: Array<{ id: number | string; wasInserted: boolean }> = [];
 
-    for (const batchResult of result.results) {
+    for (const batchResult of allBatchResults) {
         totalCreated += batchResult.created;
         totalUpdated += batchResult.updated;
         totalUnchanged += batchResult.unchanged;
@@ -810,15 +850,15 @@ export async function executeRawUpsertBatch(
         }
     }
 
-    if (result.errors.length > 0) {
+    if (allBatchErrors.length > 0) {
         logError(
             "executeRawUpsertBatch",
-            new Error(`${result.errors.length} batches failed`),
-            { failedCount: result.errors.length }
+            new Error(`${allBatchErrors.length} batches failed`),
+            { failedCount: allBatchErrors.length }
         );
 
-        if (result.results.length === 0) {
-            throw result.errors[0].error;
+        if (allBatchResults.length === 0) {
+            throw allBatchErrors[0].error;
         }
     }
 

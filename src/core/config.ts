@@ -2,6 +2,34 @@ import { PrismaClient } from '@prisma/client';
 import { RateLimiter, createRateLimiter } from './rate-limiter';
 import { getDatabaseProvider } from './utils/database-utils';
 
+export interface UpsertManyResultSummary {
+    created: number;
+    updated: number;
+    unchanged: number;
+    total: number;
+}
+
+export interface UpsertManyHookContext {
+    modelName: string;
+    provider: string;
+    useRawQuery: boolean;
+    totalItems: number;
+}
+
+export interface UpsertManyBeforeHookPayload extends UpsertManyHookContext {
+    originalItems: Array<Record<string, unknown>>;
+    normalizedItems: Array<Record<string, unknown>>;
+}
+
+export interface UpsertManyAfterHookPayload extends UpsertManyHookContext {
+    result: UpsertManyResultSummary;
+}
+
+export interface UpsertManyHooks {
+    beforeUpsertMany?: (payload: UpsertManyBeforeHookPayload) => void | Promise<void>;
+    afterUpsertMany?: (payload: UpsertManyAfterHookPayload) => void | Promise<void>;
+}
+
 /**
  * Configuration options for Prisma Entity Framework
  */
@@ -23,6 +51,18 @@ export interface PrismaConfig {
      * Default: 100
      */
     maxQueriesPerSecond?: number;
+
+    /**
+     * Controls whether SQL upsertMany uses raw SQL by default.
+     * true = raw SQL path (higher throughput), false = Prisma operations path (middleware/extensions compatible).
+     * Default: true
+     */
+    upsertManyUseRawQuery?: boolean;
+
+    /**
+     * Optional global hooks for upsertMany execution.
+     */
+    upsertManyHooks?: UpsertManyHooks;
 }
 
 /**
@@ -37,6 +77,8 @@ let globalConfig: PrismaConfig = {
     maxConcurrency: undefined,
     enableParallel: true,
     maxQueriesPerSecond: 100,
+    upsertManyUseRawQuery: true,
+    upsertManyHooks: undefined,
 };
 
 /**
@@ -88,6 +130,10 @@ export function configurePrisma(prisma: PrismaClient, config?: PrismaConfig): vo
             if (!Number.isFinite(config.maxQueriesPerSecond) || config.maxQueriesPerSecond <= 0) {
                 throw new Error('maxQueriesPerSecond must be a positive number');
             }
+        }
+
+        if (config.upsertManyUseRawQuery !== undefined && typeof config.upsertManyUseRawQuery !== 'boolean') {
+            throw new Error('upsertManyUseRawQuery must be a boolean');
         }
         
         // Merge with global config
@@ -142,6 +188,8 @@ export function resetPrismaConfiguration(): void {
         maxConcurrency: undefined,
         enableParallel: true,
         maxQueriesPerSecond: 100,
+        upsertManyUseRawQuery: true,
+        upsertManyHooks: undefined,
     };
 }
 

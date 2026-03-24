@@ -828,6 +828,59 @@ describe('upsert-utils', () => {
             expect(result.updated).toBe(0);
             expect(result.unchanged).toBe(2);
         });
+
+        it('should split raw SQL by field signature in patch-safe mode', async () => {
+            clearDatabaseProviderCache();
+            const sqlitePrisma = {
+                ...mockPrismaClient,
+                _engineConfig: {
+                    datasources: [{ activeProvider: 'sqlite' }],
+                },
+                $queryRawUnsafe: jest.fn().mockResolvedValue([{ cnt: 0 }]),
+                $executeRawUnsafe: jest.fn().mockResolvedValue(1),
+            };
+            configurePrisma(sqlitePrisma as any);
+
+            const items = [
+                { name: 'NoAge', email: 'noage@example.com' },
+                { name: 'WithAge', email: 'withage@example.com', age: 40 },
+            ];
+
+            const result = await executeRawUpsertBatch('user', userModelInfo as any, items);
+
+            expect(sqlitePrisma.$executeRawUnsafe).toHaveBeenCalledTimes(2);
+            const sqlCalls = sqlitePrisma.$executeRawUnsafe.mock.calls.map((c: any[]) => String(c[0]));
+
+            // One query for signature without age and one query with age
+            expect(sqlCalls.some(sql => !sql.includes('"age"'))).toBe(true);
+            expect(sqlCalls.some(sql => sql.includes('"age"'))).toBe(true);
+
+            expect(result.created).toBe(2);
+            expect(result.updated).toBe(0);
+            expect(result.unchanged).toBe(0);
+        });
+
+        it('should allow disabling patch-safe grouping', async () => {
+            clearDatabaseProviderCache();
+            const sqlitePrisma = {
+                ...mockPrismaClient,
+                _engineConfig: {
+                    datasources: [{ activeProvider: 'sqlite' }],
+                },
+                $queryRawUnsafe: jest.fn().mockResolvedValue([{ cnt: 0 }]),
+                $executeRawUnsafe: jest.fn().mockResolvedValue(2),
+            };
+            configurePrisma(sqlitePrisma as any);
+
+            const items = [
+                { name: 'NoAge', email: 'noage@example.com' },
+                { name: 'WithAge', email: 'withage@example.com', age: 40 },
+            ];
+
+            await executeRawUpsertBatch('user', userModelInfo as any, items, { patchSafeRaw: false });
+
+            expect(sqlitePrisma.$executeRawUnsafe).toHaveBeenCalledTimes(1);
+        });
     });
 
     // ===============================================================

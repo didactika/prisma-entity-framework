@@ -206,6 +206,94 @@ describe('BaseEntity - Upsert', () => {
         total: 0
       });
     });
+
+    it('should use Prisma operations when useRawQuery is false', async () => {
+      const result = await User.upsertMany(
+        [{ email: 'prisma-mode@example.com', name: 'Prisma Mode' }],
+        { useRawQuery: false }
+      );
+
+      expect(mockPrismaClient.$executeRawUnsafe).not.toHaveBeenCalled();
+      expect(mockPrismaClient.user.create).toHaveBeenCalled();
+      expect(result.total).toBe(1);
+      expect(result.created).toBe(1);
+    });
+
+    it('should run before and after hooks when provided', async () => {
+      const beforeUpsertMany = jest.fn(async (_payload: unknown) => undefined);
+      const afterUpsertMany = jest.fn(async (_payload: unknown) => undefined);
+
+      await User.upsertMany(
+        [{ email: 'hooks@example.com', name: 'Hooks User' }],
+        {
+          hooks: {
+            beforeUpsertMany,
+            afterUpsertMany,
+          }
+        }
+      );
+
+      expect(beforeUpsertMany).toHaveBeenCalledTimes(1);
+      expect(afterUpsertMany).toHaveBeenCalledTimes(1);
+      expect(beforeUpsertMany.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          modelName: 'user',
+          totalItems: 1,
+        })
+      );
+      expect(afterUpsertMany.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          modelName: 'user',
+          totalItems: 1,
+          result: expect.objectContaining({ total: 1 })
+        })
+      );
+    });
+
+    it('should use global config useRawQuery when local option is not provided', async () => {
+      configurePrisma(mockPrismaClient as any, { upsertManyUseRawQuery: false });
+
+      await User.upsertMany([{ email: 'global-prisma@example.com', name: 'Global Prisma' }]);
+
+      expect(mockPrismaClient.$executeRawUnsafe).not.toHaveBeenCalled();
+      expect(mockPrismaClient.user.create).toHaveBeenCalled();
+    });
+
+    it('should prioritize local useRawQuery over global config', async () => {
+      configurePrisma(mockPrismaClient as any, { upsertManyUseRawQuery: false });
+      jest.spyOn(mockPrismaClient, '$queryRawUnsafe' as any).mockResolvedValue([{ cnt: 0 }]);
+      jest.spyOn(mockPrismaClient, '$executeRawUnsafe').mockResolvedValue(1);
+
+      await User.upsertMany(
+        [{ email: 'override-raw@example.com', name: 'Override Raw' }],
+        { useRawQuery: true }
+      );
+
+      expect(mockPrismaClient.$executeRawUnsafe).toHaveBeenCalled();
+    });
+
+    it('should run global and local hooks in order', async () => {
+      const callOrder: string[] = [];
+
+      configurePrisma(mockPrismaClient as any, {
+        upsertManyHooks: {
+          beforeUpsertMany: async () => { callOrder.push('global-before'); },
+          afterUpsertMany: async () => { callOrder.push('global-after'); },
+        },
+      });
+
+      await User.upsertMany(
+        [{ email: 'hooks-order@example.com', name: 'Hooks Order' }],
+        {
+          hooks: {
+            beforeUpsertMany: async () => { callOrder.push('local-before'); },
+            afterUpsertMany: async () => { callOrder.push('local-after'); },
+          }
+        }
+      );
+
+      expect(callOrder).toEqual(['global-before', 'local-before', 'global-after', 'local-after']);
+    });
   });
 
   describe('Change Detection Performance', () => {
