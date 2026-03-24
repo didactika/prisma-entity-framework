@@ -807,7 +807,7 @@ export async function executeRawUpsertBatch(
 
                         if (needsPreCount) {
                             const countQuery = buildPreCountQuery(meta, batch, prisma);
-                            const countResult = await prisma.$queryRawUnsafe(countQuery);
+                            const countResult = await prisma.$queryRawUnsafe<Array<{ cnt: unknown }>>(countQuery);
                             existingCount = Number(countResult?.[0]?.cnt ?? 0);
                         }
 
