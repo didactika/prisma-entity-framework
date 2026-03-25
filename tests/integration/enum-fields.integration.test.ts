@@ -202,10 +202,10 @@ describe('Prisma Enum Fields - Integration Tests', () => {
         }
       ]);
 
-      expect(result.created).toBe(1);
-      expect(result.updated).toBe(1);
-      expect(result.unchanged).toBe(1);
-      expect(result.total).toBe(3);
+      expect(result.counts.created).toBe(1);
+      expect(result.counts.updated).toBe(1);
+      expect(result.counts.unchanged).toBe(1);
+      expect(result.counts.total).toBe(3);
 
       const updated = await db.client.taskItem.findUnique({ where: { code: 'ENUM-BATCH-UPDATED' } });
       const created = await db.client.taskItem.findUnique({ where: { code: 'ENUM-BATCH-CREATED' } });

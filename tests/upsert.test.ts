@@ -11,6 +11,21 @@ import { clearUpsertMetadataCache } from '../src/core/upsert-utils';
 import ModelUtils from '../src/core/model-utils';
 import { createMockModel, mockPrismaClient } from './__mocks__/prisma-client.mock';
 
+const originalDatabaseUrl = process.env.DATABASE_URL;
+
+function expectDetailedCounts(
+  result: {
+    counts: { created: number; updated: number; unchanged: number; total: number };
+    items: { createdIds: Array<number | string>; updatedIds: Array<number | string>; unchangedIds: Array<number | string> };
+  },
+  expected: { created: number; updated: number; unchanged: number; total: number }
+) {
+  expect(result.counts).toEqual(expected);
+  expect(Array.isArray(result.items.createdIds)).toBe(true);
+  expect(Array.isArray(result.items.updatedIds)).toBe(true);
+  expect(Array.isArray(result.items.unchangedIds)).toBe(true);
+}
+
 function mockDecimal(value: string) {
   const num = Number.parseFloat(value);
   return {
@@ -145,11 +160,17 @@ describe('BaseEntity - Upsert', () => {
     (courseStateModel as any)._reset();
     clearDatabaseProviderCache();
     clearUpsertMetadataCache();
+    process.env.DATABASE_URL = 'file:./test.db';
   });
 
   afterEach(() => {
     resetPrismaConfiguration();
     clearDatabaseProviderCache();
+    if (originalDatabaseUrl === undefined) {
+      delete process.env.DATABASE_URL;
+    } else {
+      process.env.DATABASE_URL = originalDatabaseUrl;
+    }
   });
 
   describe('upsert', () => {
@@ -214,7 +235,7 @@ describe('BaseEntity - Upsert', () => {
 
       const result = await User.upsertMany(items);
 
-      expect(result).toEqual({
+      expectDetailedCounts(result, {
         created: 1,
         updated: 1,
         unchanged: 1,
@@ -235,7 +256,7 @@ describe('BaseEntity - Upsert', () => {
 
       const result = await User.upsertMany(items);
 
-      expect(result).toEqual({
+      expectDetailedCounts(result, {
         created: 2,
         updated: 0,
         unchanged: 0,
@@ -246,7 +267,7 @@ describe('BaseEntity - Upsert', () => {
     it('should return zero counts for empty array', async () => {
       const result = await User.upsertMany([]);
 
-      expect(result).toEqual({
+      expectDetailedCounts(result, {
         created: 0,
         updated: 0,
         unchanged: 0,
@@ -262,8 +283,39 @@ describe('BaseEntity - Upsert', () => {
 
       expect(mockPrismaClient.$executeRawUnsafe).not.toHaveBeenCalled();
       expect(mockPrismaClient.user.create).toHaveBeenCalled();
-      expect(result.total).toBe(1);
-      expect(result.created).toBe(1);
+      expect(result.counts.total).toBe(1);
+      expect(result.counts.created).toBe(1);
+    });
+
+    it('should use PostgreSQL staging-table upsert path when provider is postgresql', async () => {
+      process.env.DATABASE_URL = 'postgresql://user:pass@localhost:5432/testdb';
+      clearDatabaseProviderCache();
+
+      jest.spyOn(mockPrismaClient, '$queryRawUnsafe' as any).mockResolvedValue([
+        {
+          unchanged_ids: [2],
+          updated_ids: [1],
+          inserted_ids: [3]
+        }
+      ]);
+
+      const result = await User.upsertMany([
+        { email: 'john@example.com', name: 'John Updated' },
+        { email: 'jane@example.com', name: 'Jane Smith' },
+        { email: 'new@example.com', name: 'New User' }
+      ]);
+
+      expect(mockPrismaClient.$transaction).toHaveBeenCalledTimes(1);
+      expect(mockPrismaClient.$executeRawUnsafe).toHaveBeenCalled();
+      expectDetailedCounts(result, {
+        created: 1,
+        updated: 1,
+        unchanged: 1,
+        total: 3
+      });
+      expect(result.items.createdIds).toEqual([3]);
+      expect(result.items.updatedIds).toEqual([1]);
+      expect(result.items.unchangedIds).toEqual([2]);
     });
 
     it('should run before and after hooks when provided', async () => {
@@ -372,8 +424,9 @@ describe('BaseEntity - Upsert', () => {
 
       try {
         jest.spyOn(mockPrismaClient, '$queryRawUnsafe' as any).mockImplementation(async (...args: unknown[]) => {
-          const query = String(args[0] ?? '');
-          if (/from\s+["`\[]?course_state/i.test(query)) {
+          const rawQuery = args[0];
+          const query = typeof rawQuery === 'string' ? rawQuery : JSON.stringify(rawQuery);
+          if (/from\s+(?:"|`|\[)?course_state/i.test(query)) {
             return [
               {
                 id: 1,
@@ -407,7 +460,7 @@ describe('BaseEntity - Upsert', () => {
         expect(mockPrismaClient.$executeRawUnsafe).toHaveBeenCalled();
         expect((courseStateModel as any).update).not.toHaveBeenCalled();
         expect((courseStateModel as any).create).not.toHaveBeenCalled();
-        expect(result).toEqual({
+        expectDetailedCounts(result, {
           created: 0,
           updated: 1,
           unchanged: 0,
@@ -647,9 +700,9 @@ describe('BaseEntity - Upsert', () => {
 
       const result = await User.upsertMany(items);
 
-      expect(result.unchanged).toBe(2);
-      expect(result.updated).toBe(0);
-      expect(result.created).toBe(0);
+      expect(result.counts.unchanged).toBe(2);
+      expect(result.counts.updated).toBe(0);
+      expect(result.counts.created).toBe(0);
     });
   });
 });

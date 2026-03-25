@@ -548,6 +548,24 @@ export interface UpsertResult {
     returnedIds?: Array<{ id: number | string; wasInserted: boolean }>;
 }
 
+export interface UpsertDetailedCounts {
+    created: number;
+    updated: number;
+    unchanged: number;
+    total: number;
+}
+
+export interface UpsertDetailedItems {
+    createdIds: Array<number | string>;
+    updatedIds: Array<number | string>;
+    unchangedIds: Array<number | string>;
+}
+
+export interface UpsertDetailedResult {
+    counts: UpsertDetailedCounts;
+    items: UpsertDetailedItems;
+}
+
 function toSafeNonNegativeInteger(value: unknown): number {
     const numeric = Number(value);
     if (!Number.isFinite(numeric) || numeric <= 0) return 0;
@@ -605,6 +623,15 @@ function normalizeUpsertCounts(
     }
 
     return { created, updated, unchanged };
+}
+
+function parseJsonIdArray(value: unknown): Array<number | string> {
+    if (typeof value === 'string') {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed as Array<number | string> : [];
+    }
+
+    return Array.isArray(value) ? value as Array<number | string> : [];
 }
 
 export function parseUpsertResults(
@@ -710,6 +737,177 @@ export function parseUpsertResults(
         default:
             return { created: 0, updated: 0, unchanged: totalItems };
     }
+}
+
+// ---------------------------------------------------------------------------
+// PostgreSQL massive upsert (staging table + CTE)
+// ---------------------------------------------------------------------------
+
+export async function executeMassivePostgresUpsert(
+    meta: UpsertMetadata,
+    items: Record<string, unknown>[],
+    prisma: PrismaClient
+): Promise<UpsertDetailedResult> {
+    const emptyResult: UpsertDetailedResult = {
+        counts: { created: 0, updated: 0, unchanged: 0, total: items.length },
+        items: { createdIds: [], updatedIds: [], unchangedIds: [] }
+    };
+
+    if (!isNonEmptyArray(items)) {
+        return emptyResult;
+    }
+
+    const dedupedItems = deduplicateByUniqueKey(items, meta.uniqueConflictColumns);
+    const duplicatesRemoved = items.length - dedupedItems.length;
+
+    const tableName = q(meta.tableName, prisma);
+    const tempTableIdentifier = `temp_staging_${meta.tableName}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const tempTableName = q(tempTableIdentifier, prisma);
+
+    const insertCols = getInsertableColumns(meta, dedupedItems).filter(col => {
+        if (!col.isId || !col.hasDefault) return true;
+        // If any row omits id, let the database default generate it for all new rows.
+        return dedupedItems.every(item => item[col.prismaName] !== undefined && item[col.prismaName] !== null);
+    });
+    const colList = insertCols.map(c => q(c.dbName, prisma)).join(', ');
+    const idCol = meta.allColumns.find(c => c.isId) || { dbName: 'id', prismaName: 'id' };
+    const qId = q(idCol.dbName, prisma);
+
+    const matchConditions = meta.uniqueConflictColumns
+        .map(c => `t.${q(c.dbName, prisma)} = s.${q(c.dbName, prisma)}`)
+        .join(' AND ');
+
+    const { updatable, comparable } = getEffectiveColumns(meta, insertCols);
+
+    let diffConditions = 'FALSE';
+    if (comparable.length > 0) {
+        const tCols = comparable.map(c => `t.${q(c.dbName, prisma)}`).join(', ');
+        const sCols = comparable.map(c => `s.${q(c.dbName, prisma)}`).join(', ');
+        diffConditions = `(${tCols}) IS DISTINCT FROM (${sCols})`;
+    }
+
+    const setClauses = updatable.map(col => {
+        if (col.isUpdatedAt) {
+            return `${q(col.dbName, prisma)} = NOW()`;
+        }
+        return `${q(col.dbName, prisma)} = s.${q(col.dbName, prisma)}`;
+    }).join(', ');
+
+    return await prisma.$transaction(async (tx) => {
+        let tempTableCreated = false;
+
+        try {
+            await tx.$executeRawUnsafe(
+                `CREATE TEMP TABLE ${tempTableName} ON COMMIT DROP AS SELECT * FROM ${tableName} WHERE FALSE`
+            );
+            tempTableCreated = true;
+
+            const chunkSize = 5000;
+            for (let i = 0; i < dedupedItems.length; i += chunkSize) {
+                const chunk = dedupedItems.slice(i, i + chunkSize);
+                const valueRows = chunk.map(item => {
+                    const vals = insertCols.map(col =>
+                        columnInsertValue(
+                            col,
+                            item[col.prismaName],
+                            'postgresql',
+                            prisma,
+                            meta.jsonFields,
+                            true
+                        )
+                    );
+                    return `(${vals.join(', ')})`;
+                });
+
+                await tx.$executeRawUnsafe(
+                    `INSERT INTO ${tempTableName} (${colList}) VALUES ${valueRows.join(', ')}`
+                );
+            }
+
+            const tempConflictCols = meta.uniqueConflictColumns.map(c => q(c.dbName, prisma)).join(', ');
+            await tx.$executeRawUnsafe(`CREATE UNIQUE INDEX ON ${tempTableName} (${tempConflictCols});`);
+            await tx.$executeRawUnsafe(`ANALYZE ${tempTableName};`);
+
+            let superQuery = '';
+            if (updatable.length === 0) {
+                superQuery = `
+                    WITH
+                    unchanged_records AS (
+                        SELECT t.${qId} FROM ${tableName} t INNER JOIN ${tempTableName} s ON ${matchConditions}
+                    ),
+                    inserted_records AS (
+                        INSERT INTO ${tableName} (${colList})
+                        SELECT ${colList} FROM ${tempTableName} s
+                        WHERE NOT EXISTS (SELECT 1 FROM ${tableName} t WHERE ${matchConditions})
+                        ON CONFLICT DO NOTHING
+                        RETURNING ${qId}
+                    )
+                    SELECT
+                        (SELECT COALESCE(json_agg(${qId}), '[]'::json) FROM unchanged_records) AS unchanged_ids,
+                        '[]'::json AS updated_ids,
+                        (SELECT COALESCE(json_agg(${qId}), '[]'::json) FROM inserted_records) AS inserted_ids;
+                `;
+            } else {
+                superQuery = `
+                    WITH
+                    unchanged_records AS (
+                        SELECT t.${qId} FROM ${tableName} t INNER JOIN ${tempTableName} s ON ${matchConditions} WHERE NOT (${diffConditions})
+                    ),
+                    updated_records AS (
+                        UPDATE ${tableName} t SET ${setClauses} FROM ${tempTableName} s WHERE ${matchConditions} AND (${diffConditions})
+                        RETURNING t.${qId}
+                    ),
+                    inserted_records AS (
+                        INSERT INTO ${tableName} (${colList})
+                        SELECT ${colList} FROM ${tempTableName} s
+                        WHERE NOT EXISTS (SELECT 1 FROM ${tableName} t WHERE ${matchConditions})
+                        ON CONFLICT DO NOTHING
+                        RETURNING ${qId}
+                    )
+                    SELECT
+                        (SELECT COALESCE(json_agg(${qId}), '[]'::json) FROM unchanged_records) AS unchanged_ids,
+                        (SELECT COALESCE(json_agg(${qId}), '[]'::json) FROM updated_records) AS updated_ids,
+                        (SELECT COALESCE(json_agg(${qId}), '[]'::json) FROM inserted_records) AS inserted_ids;
+                `;
+            }
+
+            const result = await tx.$queryRawUnsafe<Array<{
+                unchanged_ids: unknown;
+                updated_ids: unknown;
+                inserted_ids: unknown;
+            }>>(superQuery);
+            const row = result[0] ?? { unchanged_ids: [], updated_ids: [], inserted_ids: [] };
+
+            const unchangedIds = parseJsonIdArray(row.unchanged_ids);
+            const updatedIds = parseJsonIdArray(row.updated_ids);
+            const createdIds = parseJsonIdArray(row.inserted_ids);
+
+            return {
+                counts: {
+                    created: createdIds.length,
+                    updated: updatedIds.length,
+                    unchanged: unchangedIds.length + duplicatesRemoved,
+                    total: items.length
+                },
+                items: {
+                    createdIds,
+                    updatedIds,
+                    unchangedIds
+                }
+            };
+        } finally {
+            if (tempTableCreated) {
+                try {
+                    await tx.$executeRawUnsafe(`DROP TABLE IF EXISTS ${tempTableName}`);
+                } catch {
+                    // Table is auto-dropped via ON COMMIT DROP when the transaction ends.
+                    // If we're already in an aborted transaction state, ignore the error.
+                }
+            }
+        }
+    }, {
+        timeout: 300000
+    });
 }
 
 // ---------------------------------------------------------------------------

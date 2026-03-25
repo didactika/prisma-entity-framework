@@ -158,7 +158,7 @@ describe('Database Compatibility - Comprehensive Tests', () => {
                 concurrency: capabilities.maxConcurrency
             });
 
-            expect(createResult.created).toBe(BATCH_SIZE);
+            expect(createResult.counts.created).toBe(BATCH_SIZE);
 
             // Update half, create new half
             const upsertUsers = [
@@ -183,8 +183,8 @@ describe('Database Compatibility - Comprehensive Tests', () => {
 
             metrics.record('upsertMany', duration);
 
-            expect(upsertResult.updated).toBe(BATCH_SIZE / 2);
-            expect(upsertResult.created).toBe(BATCH_SIZE / 2);
+            expect(upsertResult.counts.updated).toBe(BATCH_SIZE / 2);
+            expect(upsertResult.counts.created).toBe(BATCH_SIZE / 2);
 
             console.log(`   ✅ Upserted ${BATCH_SIZE} users in ${duration}ms`);
         }, 30000);
@@ -212,8 +212,8 @@ describe('Database Compatibility - Comprehensive Tests', () => {
             });
 
             // Should update all existing users
-            expect(result.updated).toBe(100);
-            expect(result.created).toBe(0);
+            expect(result.counts.updated).toBe(100);
+            expect(result.counts.created).toBe(0);
 
             // Verify updates
             const updatedUsers = await prisma.user.findMany();

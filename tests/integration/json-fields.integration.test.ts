@@ -290,9 +290,9 @@ describe('JSON Fields Integration Tests', () => {
 
         const result = await Product.upsertMany(items);
 
-        expect(result.created).toBe(3);
-        expect(result.updated).toBe(0);
-        expect(result.unchanged).toBe(0);
+        expect(result.counts.created).toBe(3);
+        expect(result.counts.updated).toBe(0);
+        expect(result.counts.unchanged).toBe(0);
 
         // Verify in database
         const products = await db.client.product.findMany({ orderBy: { sku: 'asc' } });
@@ -328,9 +328,9 @@ describe('JSON Fields Integration Tests', () => {
 
         const result = await Product.upsertMany(items);
 
-        expect(result.created).toBe(0);
-        expect(result.updated).toBe(2);
-        expect(result.unchanged).toBe(0);
+        expect(result.counts.created).toBe(0);
+        expect(result.counts.updated).toBe(2);
+        expect(result.counts.unchanged).toBe(0);
 
         // Verify in database
         const product1 = await db.client.product.findUnique({ where: { sku: 'UPDATE-BATCH-001' } });
@@ -374,7 +374,7 @@ describe('JSON Fields Integration Tests', () => {
 
         const result = await Product.upsertMany(items);
 
-        expect(result.created).toBe(2);
+        expect(result.counts.created).toBe(2);
 
         const products = await db.client.product.findMany({ orderBy: { sku: 'asc' } });
         expect(products[0].metadata.product.features).toEqual(['5G', 'waterproof', 'wireless charging']);
@@ -533,7 +533,7 @@ describe('JSON Fields Integration Tests', () => {
 
       const result = await Product.upsertMany(items);
 
-      expect(result.created).toBe(3);
+      expect(result.counts.created).toBe(3);
 
       const products = await db.client.product.findMany({ orderBy: { sku: 'asc' } });
       expect(products[0].metadata.text).toBe("with 'quotes'");
@@ -775,7 +775,7 @@ describe('JSON Fields Integration Tests', () => {
 
       const result = await Product.upsertMany(items);
 
-      expect(result.updated).toBe(1);
+      expect(result.counts.updated).toBe(1);
 
       const product = await db.client.product.findUnique({ where: { sku: 'COMPLEX-SQL-001' } });
       expect(product.metadata.product.features).toEqual(['5G', 'waterproof', 'wireless charging']);

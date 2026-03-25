@@ -1210,10 +1210,10 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
         const result = await User.upsertMany(items);
 
-        expect(result.total).toBe(2);
-        expect(result.created).toBe(1);
-        expect(result.updated).toBe(1);
-        expect(result.unchanged).toBe(0);
+        expect(result.counts.total).toBe(2);
+        expect(result.counts.created).toBe(1);
+        expect(result.counts.updated).toBe(1);
+        expect(result.counts.unchanged).toBe(0);
 
         // Verify in database
         const allUsers = await prisma.user.findMany();
@@ -1241,10 +1241,10 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
         const result = await User.upsertMany(items);
 
-        expect(result.total).toBe(3);
-        expect(result.created).toBe(3);
-        expect(result.updated).toBe(0);
-        expect(result.unchanged).toBe(0);
+        expect(result.counts.total).toBe(3);
+        expect(result.counts.created).toBe(3);
+        expect(result.counts.updated).toBe(0);
+        expect(result.counts.unchanged).toBe(0);
 
         // Verify in database
         const allUsers = await prisma.user.findMany();
@@ -1271,10 +1271,10 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
         const result = await User.upsertMany(items);
 
-        expect(result.total).toBe(2);
-        expect(result.created).toBe(0);
-        expect(result.updated).toBe(2);
-        expect(result.unchanged).toBe(0);
+        expect(result.counts.total).toBe(2);
+        expect(result.counts.created).toBe(0);
+        expect(result.counts.updated).toBe(2);
+        expect(result.counts.unchanged).toBe(0);
 
         // Verify updates in database
         const user1 = await prisma.user.findUnique({ where: { email: 'user1@example.com' } });
@@ -1307,10 +1307,10 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
         const result = await User.upsertMany(items);
 
-        expect(result.total).toBe(1);
-        expect(result.created).toBe(0);
-        expect(result.updated).toBe(0);
-        expect(result.unchanged).toBe(1);
+        expect(result.counts.total).toBe(1);
+        expect(result.counts.created).toBe(0);
+        expect(result.counts.updated).toBe(0);
+        expect(result.counts.unchanged).toBe(1);
 
         // Verify no update occurred
         const dbUser = await prisma.user.findUnique({ where: { email: 'same@example.com' } });
@@ -1324,10 +1324,17 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
         const result = await User.upsertMany([]);
 
         expect(result).toEqual({
-          created: 0,
-          updated: 0,
-          unchanged: 0,
-          total: 0
+          counts: {
+            created: 0,
+            updated: 0,
+            unchanged: 0,
+            total: 0
+          },
+          items: {
+            createdIds: [],
+            updatedIds: [],
+            unchangedIds: []
+          }
         });
 
         // Verify no changes in database
@@ -1363,9 +1370,9 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
         const result = await User.upsertMany(items);
 
-        expect(result.total).toBe(20);
-        expect(result.created).toBeGreaterThanOrEqual(18);
-        expect(result.updated).toBeGreaterThanOrEqual(2);
+        expect(result.counts.total).toBe(20);
+        expect(result.counts.created).toBeGreaterThanOrEqual(18);
+        expect(result.counts.updated).toBeGreaterThanOrEqual(2);
 
         // Verify total count in database
         const allUsers = await prisma.user.findMany();
@@ -1382,8 +1389,8 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
 
         const result = await User.upsertMany(items);
 
-        expect(result.total).toBe(1);
-        expect(result.created).toBe(1);
+        expect(result.counts.total).toBe(1);
+        expect(result.counts.created).toBe(1);
 
         // Verify in database
         const dbUser = await prisma.user.findUnique({ where: { email: 'transform@example.com' } });

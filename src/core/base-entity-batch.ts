@@ -18,10 +18,28 @@ import { executeWithOrBatching } from "./query-utils";
 import { hasChanges as compareHasChanges } from "./utils/comparison-utils";
 import BaseEntityHelpers from "./base-entity-helpers";
 import { EntityPrismaModel } from "./structures/interfaces/entity.interface";
-import { executeRawUpsertBatch } from "./upsert-utils";
+import {
+    executeMassivePostgresUpsert,
+    executeRawUpsertBatch,
+    getUpsertMetadata,
+    type UpsertDetailedResult
+} from "./upsert-utils";
 
 type ModelInfo = ReturnType<typeof ModelUtils.getModelInformationCached>;
 type EntityId = number | string;
+
+export type UpsertManyResult = UpsertDetailedResult;
+
+type UpsertManyRelationsContext<TModel extends object> = {
+    entityModel: EntityPrismaModel<TModel>;
+    modelInfo: ModelInfo | null;
+    normalizedItems: Record<string, unknown>[];
+    uniqueConstraints: string[][];
+    relations: Map<number, Record<string, unknown[]>>;
+    relationTypes: Map<string, "explicit" | "implicit">;
+    options?: { parallel?: boolean; concurrency?: number };
+    targetEntityIds?: Array<EntityId>;
+};
 
 type UpsertManyOptions = {
     keyTransformTemplate?: (relationName: string) => string;
@@ -63,6 +81,24 @@ type UpsertManyOptions = {
  */
 export default class BaseEntityBatch {
     static readonly MONGODB_TRANSACTION_BATCH_SIZE = 100;
+
+    private static createEmptyUpsertManyResult(total: number): UpsertManyResult {
+        return {
+            counts: { created: 0, updated: 0, unchanged: 0, total },
+            items: { createdIds: [], updatedIds: [], unchangedIds: [] }
+        };
+    }
+
+    private static createUpsertManyResult(
+        counts: { created: number; updated: number; unchanged: number; total: number },
+        items: {
+            createdIds: Array<EntityId>;
+            updatedIds: Array<EntityId>;
+            unchangedIds: Array<EntityId>;
+        }
+    ): UpsertManyResult {
+        return { counts, items };
+    }
 
     /**
      * Create multiple entities in batch.
@@ -347,10 +383,10 @@ export default class BaseEntityBatch {
         ) => Promise<number>,
         items: Partial<TModel>[],
         options?: UpsertManyOptions
-    ): Promise<{ created: number; updated: number; unchanged: number; total: number }> {
+    ): Promise<UpsertManyResult> {
         if (!entityModel) throw new Error("Model is not defined in the BaseEntity class.");
         if (!isNonEmptyArray(items)) {
-            return { created: 0, updated: 0, unchanged: 0, total: 0 };
+            return this.createEmptyUpsertManyResult(0);
         }
 
         const modelName = entityModel.name;
@@ -390,22 +426,98 @@ export default class BaseEntityBatch {
             return DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
         });
 
-        // ------------------------------------------------------------------
-        // Route: Raw SQL upsert for SQL databases, legacy path for MongoDB
-        // ------------------------------------------------------------------
+        const hasSparseShape = (() => {
+            if (normalizedItems.length <= 1) return false;
+
+            const fieldCounts = new Map<string, number>();
+            for (const item of normalizedItems) {
+                for (const key of Object.keys(item)) {
+                    fieldCounts.set(key, (fieldCounts.get(key) ?? 0) + 1);
+                }
+            }
+
+            for (const count of fieldCounts.values()) {
+                if (count > 0 && count < normalizedItems.length) {
+                    return true;
+                }
+            }
+
+            return false;
+        })();
+
         const prisma = getPrismaInstance();
         const provider = getDatabaseProviderCached(prisma);
         const config = getConfig();
         const resolvedUseRawQuery = options?.useRawQuery ?? config.upsertManyUseRawQuery ?? true;
+
+        if (provider === 'postgresql' && modelInfo && resolvedUseRawQuery && !hasSparseShape) {
+            const beforeHookPayload: UpsertManyBeforeHookPayload = {
+                modelName: modelName!,
+                provider,
+                useRawQuery: true,
+                totalItems: items.length,
+                originalItems: items as Array<Record<string, unknown>>,
+                normalizedItems
+            };
+
+            await this.runBeforeUpsertManyHooks(config.upsertManyHooks, options?.hooks, beforeHookPayload);
+
+            const meta = getUpsertMetadata(modelName!, modelInfo);
+            const result = await executeMassivePostgresUpsert(meta, normalizedItems, prisma);
+
+            if (handleRelations && relations.size > 0 && (result.counts.created > 0 || result.counts.updated > 0)) {
+                await this.applyUpsertManyRelations(
+                    {
+                        entityModel,
+                        modelInfo,
+                        normalizedItems,
+                        uniqueConstraints,
+                        relations,
+                        relationTypes,
+                        options,
+                        targetEntityIds: [...result.items.createdIds, ...result.items.updatedIds]
+                    }
+                );
+            }
+
+            const afterHookPayload: UpsertManyAfterHookPayload = {
+                modelName: modelName!,
+                provider,
+                useRawQuery: true,
+                totalItems: items.length,
+                result: {
+                    created: {
+                        count: result.counts.created,
+                        items: result.items.createdIds
+                    },
+                    updated: {
+                        count: result.counts.updated,
+                        items: result.items.updatedIds
+                    },
+                    unchanged: {
+                        count: result.counts.unchanged,
+                        items: result.items.unchangedIds
+                    },
+                    total: result.counts.total
+                }
+            };
+
+            await this.runAfterUpsertManyHooks(config.upsertManyHooks, options?.hooks, afterHookPayload);
+            return result;
+        }
+
+        // ------------------------------------------------------------------
+        // Route: Raw SQL upsert for SQL databases, legacy path for MongoDB
+        // ------------------------------------------------------------------
         const hasAfterHook = Boolean(config.upsertManyHooks?.after || options?.hooks?.after);
         let effectiveUseRawQuery = provider !== "mongodb" && resolvedUseRawQuery;
         let rawEligibleItems = normalizedItems;
         let preProcessedCreated = 0;
         let preProcessedUpdated = 0;
         let preProcessedUnchanged = 0;
-        const createdItemIds: Array<EntityId> | null = hasAfterHook ? [] : null;
-        const updatedItemIds: Array<EntityId> | null = hasAfterHook ? [] : null;
-        const unchangedItemIds: Array<EntityId> | null = hasAfterHook ? [] : null;
+        const createdItemIds: Array<EntityId> = [];
+        const updatedItemIds: Array<EntityId> = [];
+        const unchangedItemIds: Array<EntityId> = [];
 
         if (provider !== "mongodb" && resolvedUseRawQuery && modelInfo) {
             const missingRequiredFields = Array.from(new Set(this.getMissingRequiredRawInsertFields(modelInfo, normalizedItems)));
@@ -432,13 +544,13 @@ export default class BaseEntityBatch {
                     modelInfo,
                     missingRequiredItems,
                     uniqueConstraints,
-                    hasAfterHook
+                    true
                 );
 
                 preProcessedUpdated += updateOnlyResult.updated;
                 preProcessedUnchanged += updateOnlyResult.unchanged;
-                if (updatedItemIds) updatedItemIds.push(...updateOnlyResult.updatedItemIds);
-                if (unchangedItemIds) unchangedItemIds.push(...updateOnlyResult.unchangedItemIds);
+                updatedItemIds.push(...updateOnlyResult.updatedItemIds);
+                unchangedItemIds.push(...updateOnlyResult.unchangedItemIds);
 
                 if (updateOnlyResult.unresolved.length > 0) {
                     throw new Error(
@@ -476,14 +588,14 @@ export default class BaseEntityBatch {
                 uniqueConstraints,
                 options,
                 false,
-                hasAfterHook
+                true
             );
             created = legacyResult.created;
             updated = legacyResult.updated;
             unchanged = legacyResult.unchanged;
-            if (createdItemIds) createdItemIds.push(...legacyResult.createdItemIds);
-            if (updatedItemIds) updatedItemIds.push(...legacyResult.updatedItemIds);
-            if (unchangedItemIds) unchangedItemIds.push(...legacyResult.unchangedItemIds);
+            createdItemIds.push(...legacyResult.createdItemIds);
+            updatedItemIds.push(...legacyResult.updatedItemIds);
+            unchangedItemIds.push(...legacyResult.unchangedItemIds);
         } else if (rawHandledAllPreprocessed) {
             // All rows were handled by raw update-only preprocessing.
         } else if (effectiveUseRawQuery) {
@@ -493,15 +605,12 @@ export default class BaseEntityBatch {
             }
 
             if (rawEligibleItems.length > 0) {
-                // Only classify items when after hook needs detailed payload.
-                const rawBuckets = hasAfterHook
-                    ? await this.classifyRawEligibleItems(
-                        entityModel,
-                        rawEligibleItems,
-                        uniqueConstraints,
-                        options
-                    )
-                    : { createdItemIds: [], updatedItemIds: [], unchangedItemIds: [], createdWhereClauses: [] };
+                const rawBuckets = await this.classifyRawEligibleItems(
+                    entityModel,
+                    rawEligibleItems,
+                    uniqueConstraints,
+                    options
+                );
 
                 const rawResult = await executeRawUpsertBatch(
                     modelName!,
@@ -517,20 +626,18 @@ export default class BaseEntityBatch {
                 updated = rawResult.updated;
                 unchanged = rawResult.unchanged;
 
-                if (createdItemIds) {
-                    createdItemIds.push(...rawBuckets.createdItemIds);
-                    if (rawBuckets.createdWhereClauses.length > 0) {
-                        const resolvedCreatedIds = await this.resolveIdsFromWhereClauses(
-                            entityModel,
-                            rawBuckets.createdWhereClauses,
-                            uniqueConstraints,
-                            options
-                        );
-                        createdItemIds.push(...resolvedCreatedIds);
-                    }
+                createdItemIds.push(...rawBuckets.createdItemIds);
+                if (rawBuckets.createdWhereClauses.length > 0) {
+                    const resolvedCreatedIds = await this.resolveIdsFromWhereClauses(
+                        entityModel,
+                        rawBuckets.createdWhereClauses,
+                        uniqueConstraints,
+                        options
+                    );
+                    createdItemIds.push(...resolvedCreatedIds);
                 }
-                if (updatedItemIds) updatedItemIds.push(...rawBuckets.updatedItemIds);
-                if (unchangedItemIds) unchangedItemIds.push(...rawBuckets.unchangedItemIds);
+                updatedItemIds.push(...rawBuckets.updatedItemIds);
+                unchangedItemIds.push(...rawBuckets.unchangedItemIds);
             }
         } else {
             // --- SQL databases with Prisma operations (middleware/extensions compatible) ---
@@ -541,14 +648,14 @@ export default class BaseEntityBatch {
                 uniqueConstraints,
                 options,
                 true,
-                hasAfterHook
+                true
             );
             created = prismaOpsResult.created;
             updated = prismaOpsResult.updated;
             unchanged = prismaOpsResult.unchanged;
-            if (createdItemIds) createdItemIds.push(...prismaOpsResult.createdItemIds);
-            if (updatedItemIds) updatedItemIds.push(...prismaOpsResult.updatedItemIds);
-            if (unchangedItemIds) unchangedItemIds.push(...prismaOpsResult.unchangedItemIds);
+            createdItemIds.push(...prismaOpsResult.createdItemIds);
+            updatedItemIds.push(...prismaOpsResult.updatedItemIds);
+            unchangedItemIds.push(...prismaOpsResult.unchangedItemIds);
         }
 
         created += preProcessedCreated;
@@ -556,99 +663,17 @@ export default class BaseEntityBatch {
         unchanged += preProcessedUnchanged;
 
         if (handleRelations && relations.size > 0 && (created > 0 || updated > 0) && provider !== 'mongodb') {
-            const entityIdToIndexMap = new Map<number | string, number>();
-
-            // Build OR conditions only for items that have M2M relations
-            const orConditionsForM2M: Record<string, unknown>[] = [];
-            const indexMap = new Map<string, number>();
-
-            for (let i = 0; i < normalizedItems.length; i++) {
-                if (!relations.has(i)) continue;
-                const item = normalizedItems[i];
-                for (const constraint of uniqueConstraints) {
-                    const whereClause: Record<string, unknown> = {};
-                    let hasAllFields = true;
-                    for (const field of constraint) {
-                        const value = item[field];
-                        if (value !== undefined && value !== null) {
-                            whereClause[field] = value;
-                        } else {
-                            hasAllFields = false;
-                            break;
-                        }
-                    }
-                    if (hasAllFields && Object.keys(whereClause).length > 0) {
-                        orConditionsForM2M.push(whereClause);
-                        const keyParts = constraint.map(f => `${f}:${item[f]}`);
-                        indexMap.set(keyParts.join('|'), i);
-                        break;
-                    }
+            await this.applyUpsertManyRelations(
+                {
+                    entityModel,
+                    modelInfo,
+                    normalizedItems,
+                    uniqueConstraints,
+                    relations,
+                    relationTypes,
+                    options
                 }
-            }
-
-            if (orConditionsForM2M.length > 0) {
-                try {
-                    const records = await entityModel.findMany({
-                        where: { OR: orConditionsForM2M }
-                    });
-                    for (const record of records) {
-                        for (const constraint of uniqueConstraints) {
-                            const keyParts = constraint.map(f =>
-                                `${f}:${(record as Record<string, unknown>)[f]}`
-                            );
-                            const origIdx = indexMap.get(keyParts.join('|'));
-                            if (origIdx !== undefined) {
-                                entityIdToIndexMap.set(record.id, origIdx);
-                                break;
-                            }
-                        }
-                    }
-                } catch (error) {
-                    logError("upsertMany - fetch IDs for M2M", error as Error);
-                }
-            }
-
-            const allEntityIds: (number | string)[] = [];
-            const remappedRelations = new Map<number, Record<string, unknown[]>>();
-
-            let newIndex = 0;
-            for (const [entityId, originalIndex] of entityIdToIndexMap.entries()) {
-                allEntityIds.push(entityId);
-                const relationData = relations.get(originalIndex);
-                if (relationData) {
-                    remappedRelations.set(newIndex, relationData);
-                }
-                newIndex++;
-            }
-
-            if (allEntityIds.length > 0 && remappedRelations.size > 0) {
-                try {
-                    const relationResult = await DataUtils.applyManyToManyRelations(
-                        allEntityIds,
-                        remappedRelations,
-                        entityModel.name!,
-                        modelInfo,
-                        relationTypes,
-                        {
-                            parallel: options?.parallel,
-                            concurrency: options?.concurrency
-                        }
-                    );
-
-                    if (relationResult.failed > 0) {
-                        logError(
-                            "upsertMany - apply relations",
-                            new Error("Failed to apply many-to-many relations"),
-                            {
-                                failedCount: relationResult.failed,
-                                successCount: relationResult.success
-                            }
-                        );
-                    }
-                } catch (error) {
-                    logError("upsertMany - apply relations", error as Error);
-                }
-            }
+            );
         }
 
         if (hasAfterHook) {
@@ -679,12 +704,131 @@ export default class BaseEntityBatch {
             await this.runAfterUpsertManyHooks(config.upsertManyHooks, options?.hooks, afterHookPayload);
         }
 
-        return {
-            created,
-            updated,
-            unchanged,
-            total: items.length
-        };
+        return this.createUpsertManyResult(
+            {
+                created,
+                updated,
+                unchanged,
+                total: items.length
+            },
+            {
+                createdIds: createdItemIds,
+                updatedIds: updatedItemIds,
+                unchangedIds: unchangedItemIds
+            }
+        );
+    }
+
+    private static async applyUpsertManyRelations<TModel extends object>(
+        context: UpsertManyRelationsContext<TModel>
+    ): Promise<void> {
+        const {
+            entityModel,
+            modelInfo,
+            normalizedItems,
+            uniqueConstraints,
+            relations,
+            relationTypes,
+            options,
+            targetEntityIds
+        } = context;
+        const entityIdToIndexMap = new Map<number | string, number>();
+        const allowedEntityIds = targetEntityIds ? new Set(targetEntityIds) : null;
+
+        const orConditionsForM2M: Record<string, unknown>[] = [];
+        const indexMap = new Map<string, number>();
+
+        for (let i = 0; i < normalizedItems.length; i++) {
+            if (!relations.has(i)) continue;
+            const item = normalizedItems[i];
+            for (const constraint of uniqueConstraints) {
+                const whereClause: Record<string, unknown> = {};
+                let hasAllFields = true;
+                for (const field of constraint) {
+                    const value = item[field];
+                    if (value !== undefined && value !== null) {
+                        whereClause[field] = value;
+                    } else {
+                        hasAllFields = false;
+                        break;
+                    }
+                }
+                if (hasAllFields && Object.keys(whereClause).length > 0) {
+                    orConditionsForM2M.push(whereClause);
+                    const keyParts = constraint.map(f => `${f}:${item[f]}`);
+                    indexMap.set(keyParts.join('|'), i);
+                    break;
+                }
+            }
+        }
+
+        if (orConditionsForM2M.length > 0) {
+            try {
+                const records = await entityModel.findMany({
+                    where: { OR: orConditionsForM2M }
+                });
+                for (const record of records) {
+                    if (allowedEntityIds && !allowedEntityIds.has(record.id)) {
+                        continue;
+                    }
+
+                    for (const constraint of uniqueConstraints) {
+                        const keyParts = constraint.map(f =>
+                            `${f}:${(record as Record<string, unknown>)[f]}`
+                        );
+                        const origIdx = indexMap.get(keyParts.join('|'));
+                        if (origIdx !== undefined) {
+                            entityIdToIndexMap.set(record.id, origIdx);
+                            break;
+                        }
+                    }
+                }
+            } catch (error) {
+                logError("upsertMany - fetch IDs for M2M", error as Error);
+            }
+        }
+
+        const allEntityIds: (number | string)[] = [];
+        const remappedRelations = new Map<number, Record<string, unknown[]>>();
+
+        let newIndex = 0;
+        for (const [entityId, originalIndex] of entityIdToIndexMap.entries()) {
+            allEntityIds.push(entityId);
+            const relationData = relations.get(originalIndex);
+            if (relationData) {
+                remappedRelations.set(newIndex, relationData);
+            }
+            newIndex++;
+        }
+
+        if (allEntityIds.length > 0 && remappedRelations.size > 0) {
+            try {
+                const relationResult = await DataUtils.applyManyToManyRelations(
+                    allEntityIds,
+                    remappedRelations,
+                    entityModel.name!,
+                    modelInfo,
+                    relationTypes,
+                    {
+                        parallel: options?.parallel,
+                        concurrency: options?.concurrency
+                    }
+                );
+
+                if (relationResult.failed > 0) {
+                    logError(
+                        "upsertMany - apply relations",
+                        new Error("Failed to apply many-to-many relations"),
+                        {
+                            failedCount: relationResult.failed,
+                            successCount: relationResult.success
+                        }
+                    );
+                }
+            } catch (error) {
+                logError("upsertMany - apply relations", error as Error);
+            }
+        }
     }
 
     private static async runBeforeUpsertManyHooks(

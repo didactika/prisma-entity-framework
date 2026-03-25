@@ -122,10 +122,10 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'Item C', sku: 'BATCH-003', price: 30 },    // new
       ]);
 
-      expect(result.unchanged).toBe(1);
-      expect(result.updated).toBe(1);
-      expect(result.created).toBe(1);
-      expect(result.total).toBe(3);
+      expect(result.counts.unchanged).toBe(1);
+      expect(result.counts.updated).toBe(1);
+      expect(result.counts.created).toBe(1);
+      expect(result.counts.total).toBe(3);
     });
 
     it('should count all as unchanged when nothing changed', async () => {
@@ -141,9 +141,9 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'X2', sku: 'UNCH-002', price: 15 },
       ]);
 
-      expect(result.unchanged).toBe(2);
-      expect(result.updated).toBe(0);
-      expect(result.created).toBe(0);
+      expect(result.counts.unchanged).toBe(2);
+      expect(result.counts.updated).toBe(0);
+      expect(result.counts.created).toBe(0);
     });
   });
 
@@ -155,10 +155,10 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'Prod C', sku: 'NEW-003', price: 30 },
       ]);
 
-      expect(result.created).toBe(3);
-      expect(result.updated).toBe(0);
-      expect(result.unchanged).toBe(0);
-      expect(result.total).toBe(3);
+      expect(result.counts.created).toBe(3);
+      expect(result.counts.updated).toBe(0);
+      expect(result.counts.unchanged).toBe(0);
+      expect(result.counts.total).toBe(3);
 
       // Verify all records exist in database
       const all = await db.client.product.findMany({ orderBy: { sku: 'asc' } });
@@ -181,10 +181,10 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'New B', sku: 'UPD-002', price: 25 },
       ]);
 
-      expect(result.created).toBe(0);
-      expect(result.updated).toBe(2);
-      expect(result.unchanged).toBe(0);
-      expect(result.total).toBe(2);
+      expect(result.counts.created).toBe(0);
+      expect(result.counts.updated).toBe(2);
+      expect(result.counts.unchanged).toBe(0);
+      expect(result.counts.total).toBe(2);
 
       const a = await db.client.product.findUnique({ where: { sku: 'UPD-001' } });
       expect(a.name).toBe('New A');
@@ -200,10 +200,10 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'Solo', sku: 'SOLO-001', price: 99 },
       ]);
 
-      expect(result.created).toBe(1);
-      expect(result.updated).toBe(0);
-      expect(result.unchanged).toBe(0);
-      expect(result.total).toBe(1);
+      expect(result.counts.created).toBe(1);
+      expect(result.counts.updated).toBe(0);
+      expect(result.counts.unchanged).toBe(0);
+      expect(result.counts.total).toBe(1);
     });
 
     it('should handle single item upsert (update)', async () => {
@@ -215,10 +215,10 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'Solo New', sku: 'SOLO-002', price: 75 },
       ]);
 
-      expect(result.created).toBe(0);
-      expect(result.updated).toBe(1);
-      expect(result.unchanged).toBe(0);
-      expect(result.total).toBe(1);
+      expect(result.counts.created).toBe(0);
+      expect(result.counts.updated).toBe(1);
+      expect(result.counts.unchanged).toBe(0);
+      expect(result.counts.total).toBe(1);
     });
 
     it('should handle single item upsert (unchanged)', async () => {
@@ -230,18 +230,18 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'Solo Same', sku: 'SOLO-003', price: 42 },
       ]);
 
-      expect(result.created).toBe(0);
-      expect(result.updated).toBe(0);
-      expect(result.unchanged).toBe(1);
-      expect(result.total).toBe(1);
+      expect(result.counts.created).toBe(0);
+      expect(result.counts.updated).toBe(0);
+      expect(result.counts.unchanged).toBe(1);
+      expect(result.counts.total).toBe(1);
     });
 
     it('should return zero counts for empty array', async () => {
       const result = await Product.upsertMany([]);
-      expect(result.created).toBe(0);
-      expect(result.updated).toBe(0);
-      expect(result.unchanged).toBe(0);
-      expect(result.total).toBe(0);
+      expect(result.counts.created).toBe(0);
+      expect(result.counts.updated).toBe(0);
+      expect(result.counts.unchanged).toBe(0);
+      expect(result.counts.total).toBe(0);
     });
 
     it('should handle mixed create, update, and unchanged in one batch', async () => {
@@ -258,10 +258,10 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'Brand New', sku: 'MIX-003', price: 300 },  // created
       ]);
 
-      expect(result.created).toBe(1);
-      expect(result.updated).toBe(1);
-      expect(result.unchanged).toBe(1);
-      expect(result.total).toBe(3);
+      expect(result.counts.created).toBe(1);
+      expect(result.counts.updated).toBe(1);
+      expect(result.counts.unchanged).toBe(1);
+      expect(result.counts.total).toBe(3);
 
       // Verify database state
       const keep = await db.client.product.findUnique({ where: { sku: 'MIX-001' } });
@@ -317,8 +317,8 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'Nullable', sku: 'NULL-001', price: 10, discount: null },
       ]);
 
-      expect(result.updated).toBe(1);
-      expect(result.unchanged).toBe(0);
+      expect(result.counts.updated).toBe(1);
+      expect(result.counts.unchanged).toBe(0);
 
       const record = await db.client.product.findUnique({ where: { sku: 'NULL-001' } });
       expect(record.discount).toBeNull();
@@ -329,7 +329,7 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'No Price', sku: 'NOPRICE-001', price: null },
       ]);
 
-      expect(result.created).toBe(1);
+      expect(result.counts.created).toBe(1);
 
       const record = await db.client.product.findUnique({ where: { sku: 'NOPRICE-001' } });
       expect(record.name).toBe('No Price');
@@ -348,8 +348,8 @@ describe('Upsert Comparison Integration Tests', () => {
       ]);
 
       // Dedup: 2 → 1 (removed = 1, added to unchanged)
-      expect(result.total).toBe(2);
-      expect(result.updated).toBe(1);
+      expect(result.counts.total).toBe(2);
+      expect(result.counts.updated).toBe(1);
 
       const record = await db.client.product.findUnique({ where: { sku: 'DUP-001' } });
       expect(record.name).toBe('Last Write');
@@ -381,10 +381,10 @@ describe('Upsert Comparison Integration Tests', () => {
 
       const result = await Product.upsertMany(items);
 
-      expect(result.total).toBe(15);
-      expect(result.created).toBe(10);
-      expect(result.updated).toBe(5);
-      expect(result.unchanged).toBe(0);
+      expect(result.counts.total).toBe(15);
+      expect(result.counts.created).toBe(10);
+      expect(result.counts.updated).toBe(5);
+      expect(result.counts.unchanged).toBe(0);
 
       // Verify total count in database
       const all = await db.client.product.findMany();
@@ -400,8 +400,8 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'New Name', sku: 'NAME-001', price: 50 },
       ]);
 
-      expect(result.updated).toBe(1);
-      expect(result.unchanged).toBe(0);
+      expect(result.counts.updated).toBe(1);
+      expect(result.counts.unchanged).toBe(0);
 
       const record = await db.client.product.findUnique({ where: { sku: 'NAME-001' } });
       expect(record.name).toBe('New Name');
@@ -417,8 +417,8 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'Same Name', sku: 'PRICE-001', price: 75 },
       ]);
 
-      expect(result.updated).toBe(1);
-      expect(result.unchanged).toBe(0);
+      expect(result.counts.updated).toBe(1);
+      expect(result.counts.unchanged).toBe(0);
 
       const record = await db.client.product.findUnique({ where: { sku: 'PRICE-001' } });
       expect(record.name).toBe('Same Name');
@@ -435,8 +435,8 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'Float', sku: 'FLOAT-001', price: 19.99 },
       ]);
 
-      expect(result.unchanged).toBe(1);
-      expect(result.updated).toBe(0);
+      expect(result.counts.unchanged).toBe(1);
+      expect(result.counts.updated).toBe(0);
     });
 
     it('should handle multiple unchanged records correctly', async () => {
@@ -458,10 +458,10 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'U5', sku: 'UNCH-E', price: 5 },
       ]);
 
-      expect(result.created).toBe(0);
-      expect(result.updated).toBe(0);
-      expect(result.unchanged).toBe(5);
-      expect(result.total).toBe(5);
+      expect(result.counts.created).toBe(0);
+      expect(result.counts.updated).toBe(0);
+      expect(result.counts.unchanged).toBe(5);
+      expect(result.counts.total).toBe(5);
     });
 
     it('should handle consecutive upsertMany calls correctly', async () => {
@@ -470,26 +470,26 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'P1', sku: 'SEQ-001', price: 10 },
         { name: 'P2', sku: 'SEQ-002', price: 20 },
       ]);
-      expect(firstResult.created).toBe(2);
-      expect(firstResult.updated).toBe(0);
+      expect(firstResult.counts.created).toBe(2);
+      expect(firstResult.counts.updated).toBe(0);
 
       // Second call: same data — all unchanged
       const secondResult = await Product.upsertMany([
         { name: 'P1', sku: 'SEQ-001', price: 10 },
         { name: 'P2', sku: 'SEQ-002', price: 20 },
       ]);
-      expect(secondResult.created).toBe(0);
-      expect(secondResult.updated).toBe(0);
-      expect(secondResult.unchanged).toBe(2);
+      expect(secondResult.counts.created).toBe(0);
+      expect(secondResult.counts.updated).toBe(0);
+      expect(secondResult.counts.unchanged).toBe(2);
 
       // Third call: update one, keep other
       const thirdResult = await Product.upsertMany([
         { name: 'P1 Updated', sku: 'SEQ-001', price: 15 },
         { name: 'P2', sku: 'SEQ-002', price: 20 },
       ]);
-      expect(thirdResult.created).toBe(0);
-      expect(thirdResult.updated).toBe(1);
-      expect(thirdResult.unchanged).toBe(1);
+      expect(thirdResult.counts.created).toBe(0);
+      expect(thirdResult.counts.updated).toBe(1);
+      expect(thirdResult.counts.unchanged).toBe(1);
     });
   });
 
@@ -565,12 +565,12 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'Stable 3', sku: 'REG-UNCH-003', price: 33 },
       ]);
 
-      expect(result.created).toBe(0);
-      expect(result.updated).toBe(0);
-      expect(result.unchanged).toBe(3);
-      expect(result.total).toBe(3);
+      expect(result.counts.created).toBe(0);
+      expect(result.counts.updated).toBe(0);
+      expect(result.counts.unchanged).toBe(3);
+      expect(result.counts.total).toBe(3);
       // Invariant: counts must always sum to total
-      expect(result.created + result.updated + result.unchanged).toBe(result.total);
+      expect(result.counts.created + result.counts.updated + result.counts.unchanged).toBe(result.counts.total);
     });
 
     it('should never produce negative or NaN counts', async () => {
@@ -586,13 +586,13 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'Guard 2', sku: 'REG-GUARD-002', price: 2 },
       ]);
 
-      expect(result.created).toBeGreaterThanOrEqual(0);
-      expect(result.updated).toBeGreaterThanOrEqual(0);
-      expect(result.unchanged).toBeGreaterThanOrEqual(0);
-      expect(result.total).toBeGreaterThanOrEqual(0);
-      expect(Number.isFinite(result.created)).toBe(true);
-      expect(Number.isFinite(result.updated)).toBe(true);
-      expect(Number.isFinite(result.unchanged)).toBe(true);
+      expect(result.counts.created).toBeGreaterThanOrEqual(0);
+      expect(result.counts.updated).toBeGreaterThanOrEqual(0);
+      expect(result.counts.unchanged).toBeGreaterThanOrEqual(0);
+      expect(result.counts.total).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(result.counts.created)).toBe(true);
+      expect(Number.isFinite(result.counts.updated)).toBe(true);
+      expect(Number.isFinite(result.counts.unchanged)).toBe(true);
     });
 
     it('should count duplicate-key input items toward total and unchanged', async () => {
@@ -607,11 +607,11 @@ describe('Upsert Comparison Integration Tests', () => {
       ]);
 
       // Two items in → dedup to 1 → unchanged=1 (real) + 1 (duplicate) = 2 total
-      expect(result.total).toBe(2);
-      expect(result.created).toBe(0);
-      expect(result.updated).toBe(0);
-      expect(result.unchanged).toBe(2);
-      expect(result.created + result.updated + result.unchanged).toBe(result.total);
+      expect(result.counts.total).toBe(2);
+      expect(result.counts.created).toBe(0);
+      expect(result.counts.updated).toBe(0);
+      expect(result.counts.unchanged).toBe(2);
+      expect(result.counts.created + result.counts.updated + result.counts.unchanged).toBe(result.counts.total);
     });
 
     it('should preserve counts invariant across mixed create/update/unchanged', async () => {
@@ -628,11 +628,11 @@ describe('Upsert Comparison Integration Tests', () => {
         { name: 'New', sku: 'REG-MIX-003', price: 30 },     // created
       ]);
 
-      expect(result.created).toBe(1);
-      expect(result.updated).toBe(1);
-      expect(result.unchanged).toBe(1);
-      expect(result.total).toBe(3);
-      expect(result.created + result.updated + result.unchanged).toBe(result.total);
+      expect(result.counts.created).toBe(1);
+      expect(result.counts.updated).toBe(1);
+      expect(result.counts.unchanged).toBe(1);
+      expect(result.counts.total).toBe(3);
+      expect(result.counts.created + result.counts.updated + result.counts.unchanged).toBe(result.counts.total);
     });
   });
 
@@ -672,7 +672,7 @@ describe('Upsert Comparison Integration Tests', () => {
         }
       );
 
-      expect(result.total).toBe(1);
+      expect(result.counts.total).toBe(1);
       expect(callOrder).toEqual(['global-before', 'local-before', 'global-after', 'local-after']);
 
       const expectedUseRawQuery = db.provider !== 'mongodb';

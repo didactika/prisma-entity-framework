@@ -356,7 +356,7 @@ describe('Scalar Arrays Integration Tests', () => {
         },
       ]);
 
-      expect(result.created + result.updated).toBe(2);
+      expect(result.counts.created + result.counts.updated).toBe(2);
       
       const products = await db.client.product.findMany();
       const updated = products.find((p: any) => p.id === existing.id);

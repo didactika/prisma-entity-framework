@@ -852,8 +852,8 @@ describe('upsert-utils', () => {
             const sqlCalls = sqlitePrisma.$executeRawUnsafe.mock.calls.map((c: any[]) => String(c[0]));
 
             // One query for signature without age and one query with age
-            expect(sqlCalls.some(sql => !sql.includes('"age"'))).toBe(true);
-            expect(sqlCalls.some(sql => sql.includes('"age"'))).toBe(true);
+            expect(sqlCalls.some((sql: string) => !sql.includes('"age"'))).toBe(true);
+            expect(sqlCalls.some((sql: string) => sql.includes('"age"'))).toBe(true);
 
             expect(result.created).toBe(2);
             expect(result.updated).toBe(0);

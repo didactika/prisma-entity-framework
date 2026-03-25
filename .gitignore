@@ -54,3 +54,7 @@ tests/prisma/*.db-journal
 *.tmp
 *.temp
 .cache/
+
+#Agents
+.agents
+skills-lock.json

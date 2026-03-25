@@ -4,7 +4,7 @@ import DataUtils from "./data-utils";
 import ModelUtils from "./model-utils";
 import { logError } from "./utils/error-utils";
 import { hasChanges as compareHasChanges } from "./utils/comparison-utils";
-import BaseEntityBatch from "./base-entity-batch";
+import BaseEntityBatch, { type UpsertManyResult } from "./base-entity-batch";
 import BaseEntityQuery from "./base-entity-query";
 import BaseEntityHelpers from "./base-entity-helpers";
 import { EntityPrismaModel } from "./structures/interfaces/entity.interface";
@@ -472,7 +472,7 @@ export default abstract class BaseEntity<
      *     parallel: true 
      *   }
      * );
-     * // Returns: { created: 1, updated: 1, unchanged: 0, total: 2 }
+    * // Returns: { counts: { created: 1, updated: 1, unchanged: 0, total: 2 }, items: { ... } }
      * ```
      */
     public static async upsertMany<TModel extends object>(
@@ -486,7 +486,7 @@ export default abstract class BaseEntity<
             useRawQuery?: boolean;
             hooks?: UpsertManyHooks;
         }
-    ): Promise<{ created: number; updated: number; unchanged: number; total: number }> {
+    ): Promise<UpsertManyResult> {
         const entityModel = this.model;
         const getModelInformation = () => this.getModelInformation();
         const updateManyByIdFn = (

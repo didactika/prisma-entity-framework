@@ -404,7 +404,7 @@ export function createMockPrismaClient() {
   const mockPost = createMockModel(mockPosts, 'post');
   const mockComment = createMockModel(mockComments, 'comment');
 
-  return {
+  const prismaLike: any = {
     user: mockUser,
     post: mockPost,
     comment: mockComment,
@@ -412,14 +412,27 @@ export function createMockPrismaClient() {
     $executeRawUnsafe: jest.fn().mockResolvedValue(1),
     $queryRawUnsafe: jest.fn().mockResolvedValue([]),
     $queryRaw: jest.fn().mockResolvedValue([]),
+    $transaction: jest.fn().mockImplementation(async function (this: any, callback: any, _options?: any) {
+      return callback(this);
+    }),
     $connect: jest.fn().mockResolvedValue(undefined),
     $disconnect: jest.fn().mockResolvedValue(undefined),
     _reset: () => {
-      (mockUser as any)._reset();
-      (mockPost as any)._reset();
-      (mockComment as any)._reset();
+      Object.assign(mockUser as any, createMockModel(mockUsers, 'user'));
+      Object.assign(mockPost as any, createMockModel(mockPosts, 'post'));
+      Object.assign(mockComment as any, createMockModel(mockComments, 'comment'));
+      prismaLike.$executeRawUnsafe = jest.fn().mockResolvedValue(1);
+      prismaLike.$queryRawUnsafe = jest.fn().mockResolvedValue([]);
+      prismaLike.$queryRaw = jest.fn().mockResolvedValue([]);
+      prismaLike.$transaction = jest.fn().mockImplementation(async function (this: any, callback: any, _options?: any) {
+        return callback(this);
+      });
+      prismaLike.$connect = jest.fn().mockResolvedValue(undefined);
+      prismaLike.$disconnect = jest.fn().mockResolvedValue(undefined);
     },
   };
+
+  return prismaLike;
 }
 
 /**

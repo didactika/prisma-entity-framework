@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-03-25
+
+### Changed
+
+- **Breaking API change in `upsertMany()` return value**: `upsertMany()` now returns a detailed object shape:
+  - `counts: { created, updated, unchanged, total }`
+  - `items: { createdIds, updatedIds, unchangedIds }`
+  instead of the previous flat `{ created, updated, unchanged, total }` structure.
+- **PostgreSQL fast-path selection is now conditional**: The massive staging-table path is used only when:
+  - provider is PostgreSQL,
+  - raw mode is enabled (`useRawQuery` resolved to `true`), and
+  - the batch has a compatible non-sparse shape (consistent field presence across rows).
+- **`useRawQuery` precedence is enforced consistently**: local call options now correctly override global configuration for route selection.
+
+### Added
+
+- **Massive PostgreSQL upsert implementation** (`executeMassivePostgresUpsert`): Introduced a high-throughput path based on temporary staging tables and CTEs to classify and return created/updated/unchanged IDs in one transactional flow.
+- **Detailed upsert result types**:
+  - `UpsertDetailedCounts`
+  - `UpsertDetailedItems`
+  - `UpsertDetailedResult`
+- **Targeted test coverage for the new PostgreSQL massive path**:
+  - unit tests for staging-table execution, no-update branch behavior, and chunked inserts,
+  - integration tests validating mixed create/update/unchanged behavior and returned ID buckets.
+- **Integration test migration to the new return contract**: integration suites were updated to assert via `result.counts.*` for `upsertMany()` results.
+
+NOTE:
+- The new detailed `upsertMany()` contract applies across all providers.
+- The staging-table + CTE massive optimization is PostgreSQL-specific.
+
+### Fixed
+
+- **PostgreSQL transaction-abort masking (`25P02`)**: Cleanup logic no longer obscures the root failure when a transaction is already aborted.
+- **PostgreSQL staging-table `NULL id` insert issues**: The massive path now avoids invalid insert patterns for auto-generated IDs in mixed input scenarios.
+- **PATCH-like semantics safety on heterogeneous batches**: sparse-shape batches fall back to the non-massive route to preserve `omitted` vs `null` behavior.
+- **Flaky integration behavior in performance assertions**: adjusted environment-sensitive thresholding in parallel performance tests to reduce false negatives on noisy CI/container environments.
+
 ## [1.3.1] - 2026-03-24
 
 ### Changed
