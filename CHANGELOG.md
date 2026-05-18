@@ -7,6 +7,215 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-05-18
+
+### Fixed
+
+- **Null filter values silently ignored in `findByFilter`, `countByFilter`, and `deleteByFilter`**: `applyDefaultFilters()` was discarding fields with `null` values because `isValidValue(null)` returns `false`. Any filter like `{ deletedAt: null }` was silently stripped before reaching Prisma, causing all records to match instead of only those where the field `IS NULL`. Null values are now translated to `{ equals: null }`, which Prisma interprets as an `IS NULL` condition.
+
+### Added
+
+- **Integration tests for null filter behavior** (`tests/integration/null-filter.integration.test.ts`): 9 tests covering `countByFilter`, `findByFilter`, and `deleteByFilter` with `null` values on nullable fields, including combined null + non-null filter conditions.
+
+### Fixed
+
+- **Broken import paths in benchmark test** (`tests/benchmarks/parallel-performance.benchmark.test.ts`): Corrected stale module paths (`../../src/base-entity`, `../../src/config`, `../utils/test-db`) to their actual locations in the source tree.
+
+## [2.0.0] - 2026-03-25
+
+### Changed
+
+- **Breaking API change in `upsertMany()` return value**: `upsertMany()` now returns a detailed object shape:
+  - `counts: { created, updated, unchanged, total }`
+  - `items: { createdIds, updatedIds, unchangedIds }`
+  instead of the previous flat `{ created, updated, unchanged, total }` structure.
+- **PostgreSQL fast-path selection is now conditional**: The massive staging-table path is used only when:
+  - provider is PostgreSQL,
+  - raw mode is enabled (`useRawQuery` resolved to `true`), and
+  - the batch has a compatible non-sparse shape (consistent field presence across rows).
+- **`useRawQuery` precedence is enforced consistently**: local call options now correctly override global configuration for route selection.
+
+### Added
+
+- **Massive PostgreSQL upsert implementation** (`executeMassivePostgresUpsert`): Introduced a high-throughput path based on temporary staging tables and CTEs to classify and return created/updated/unchanged IDs in one transactional flow.
+- **Detailed upsert result types**:
+  - `UpsertDetailedCounts`
+  - `UpsertDetailedItems`
+  - `UpsertDetailedResult`
+- **Targeted test coverage for the new PostgreSQL massive path**:
+  - unit tests for staging-table execution, no-update branch behavior, and chunked inserts,
+  - integration tests validating mixed create/update/unchanged behavior and returned ID buckets.
+- **Integration test migration to the new return contract**: integration suites were updated to assert via `result.counts.*` for `upsertMany()` results.
+
+NOTE:
+- The new detailed `upsertMany()` contract applies across all providers.
+- The staging-table + CTE massive optimization is PostgreSQL-specific.
+
+### Fixed
+
+- **PostgreSQL transaction-abort masking (`25P02`)**: Cleanup logic no longer obscures the root failure when a transaction is already aborted.
+- **PostgreSQL staging-table `NULL id` insert issues**: The massive path now avoids invalid insert patterns for auto-generated IDs in mixed input scenarios.
+- **PATCH-like semantics safety on heterogeneous batches**: sparse-shape batches fall back to the non-massive route to preserve `omitted` vs `null` behavior.
+- **Flaky integration behavior in performance assertions**: adjusted environment-sensitive thresholding in parallel performance tests to reduce false negatives on noisy CI/container environments.
+
+## [1.3.1] - 2026-03-24
+
+### Changed
+
+- **Raw-first `upsertMany` flow with mixed batch handling**: With `useRawQuery` enabled on SQL providers, `upsertMany()` splits work into:
+  - rows eligible for raw upsert (`INSERT ... ON CONFLICT` / `ON DUPLICATE KEY` / `MERGE`), and
+  - rows missing required non-default fields, handled in raw update-only mode when unique keys match existing rows.
+- **Hook API simplification**: Global and per-call hooks now use `before` / `after`.
+- **Final `after` payload shape**: Hook result buckets are grouped and include only IDs (not full item objects):
+  - `created: { count, items: (number | string)[] | null }`
+  - `updated: { count, items: (number | string)[] | null }`
+  - `unchanged: { count, items: (number | string)[] | null }`
+  - `total`
+- **Hook-aware performance optimization**: Classification/fetch of `created/updated/unchanged` item details is only executed when an `after` hook is configured.
+
+### Fixed
+
+- **Required-field failures in PostgreSQL raw upsert**: Rows missing required non-null fields no longer break the full raw batch before conflict resolution.
+- **Raw update-only path for existing rows**: For rows missing required fields but with resolvable unique keys, the framework now performs raw `SELECT` + raw `UPDATE` (without Prisma create/update operations) and updates only provided fields.
+- **Explicit unresolved-row failure in raw mode**: If a row is missing required fields and no existing record matches its unique key, raw mode now fails with a clear error instead of silently switching behavior.
+- **TypeScript typing in raw pre-count path**: Fixed indexing/type issues in raw query results to avoid `TS7053` and keep compile-time safety.
+
+### Added
+
+- **Regression test coverage**: Added/updated tests for:
+  - composite unique + missing required field behavior in strict raw mode,
+  - hook order and strategy metadata,
+  - `after` payload bucket structure and ID list semantics.
+
+## [1.3.0] - 2026-03-24
+
+### Added
+
+- **`upsertMany` strategy selection**: Added `useRawQuery` option to choose between high-performance raw SQL (`true`) and Prisma operations (`false`).
+- **Global strategy config**: Added `upsertManyUseRawQuery` in `configurePrisma(...)` to define the default behavior for all `upsertMany()` calls.
+- **`upsertMany` lifecycle hooks**: Added `before` and `after` hooks, both globally (`upsertManyHooks`) and per-call (`options.hooks`).
+- **Integration coverage for new options**: Added tests validating strategy selection, global/local hook execution order, and null/omitted field behavior.
+
+#### Usage
+
+Use global defaults in `configurePrisma(...)`:
+
+```typescript
+configurePrisma(prisma, {
+  upsertManyUseRawQuery: true,
+  upsertManyHooks: {
+    before: async ({ data }) => {
+      // Inspect or transform payload before execution
+      return data;
+    },
+    after: async ({ result }) => {
+      // Audit or metrics after execution
+      return result;
+    }
+  }
+});
+```
+
+Override per call in `upsertMany(...)`:
+
+```typescript
+await User.upsertMany(items, {
+  useRawQuery: false, // Force Prisma operations (middleware/extensions compatible)
+  hooks: {
+    before: async ({ data }) => data,
+    after: async ({ result }) => result
+  }
+});
+```
+
+Quick guidance:
+
+- Set `useRawQuery: true` for maximum throughput on SQL providers.
+- Set `useRawQuery: false` when you need Prisma middleware/extensions to run.
+- Send `field: null` to clear a value; omit the field to keep the existing value unchanged.
+
+### Fixed
+
+- **PATCH-like semantics for raw SQL upserts**: `upsertMany()` now preserves omitted fields instead of accidentally overwriting them in mixed-shape batches when raw SQL is used.
+- **Explicit `null` handling in upserts**: Explicitly provided `null` values are preserved as intentional updates, while omitted (`undefined`/missing) fields are not updated.
+
+## [1.2.3] - 2026-03-16
+
+### Fixed
+
+- **`upsertMany()` with Prisma enums (Raw SQL)**: Fixed enum columns being omitted from generated `INSERT`/`UPDATE` SQL. This could cause failures like `NOT NULL constraint failed` on required enum fields.
+
+### Added
+
+- **Enum integration tests**: Added integration coverage for enum fields across `create()`, `update()`, `upsert()`, and `upsertMany()`, including mixed batch outcomes (created/updated/unchanged).
+
+## [1.2.2] - 2026-03-13
+
+### Fixed
+
+- **Prisma Validation Error with `includeNull: true` in Date Range Search**: `rangeSearch` was generating `OR` clauses with raw `field: null` conditions for DateTime filters. In this query shape Prisma expects `field: { equals: null }`, and could throw validation errors (`Argument \`createdAt\` is missing`). The null branch is now emitted as `equals: null`.
+
+- **Prisma Validation Error with Required DateTime Fields (without `includeNull`)**: For range filters without `includeNull`, the builder always appended `not: null`. This is only valid for nullable fields and caused errors on required DateTime fields (`Argument \`not\` must not be null`). Null exclusion is now applied only when the target field is nullable.
+
+### Added
+
+- **Integration Test Coverage for Date Range Null Semantics**: Added integration tests for `findByFilter` + `rangeSearch` validating:
+  - `includeNull: true` includes both in-range dates and `NULL` values on nullable DateTime fields.
+  - Omitting `includeNull` excludes `NULL` values on nullable DateTime fields.
+  - Required DateTime range filters work without Prisma validation errors.
+
+## [1.2.1] - 2026-03-13
+
+### Fixed
+
+- **All-Zero Counts for Models Without Updatable Columns**: Models used purely as join/pivot tables (e.g., composite-key-only models with no non-key columns to update) generated an empty `DO UPDATE SET` or `ON DUPLICATE KEY UPDATE SET` clause, producing invalid SQL. Batch execution would fail silently, returning `{created:0, updated:0, unchanged:0}` regardless of the input. PostgreSQL and SQLite now use `ON CONFLICT (...) DO NOTHING` when there are no updatable columns; MySQL uses a no-op self-assignment (`col = col`) as a fallback.
+
+- **Silent Batch Failure Swallowing**: `executeRawUpsertBatch` previously caught all batch errors internally and returned zero counts when every batch in a run failed. It now re-throws the first batch error when all batches fail, making the failure visible to the caller instead of silently producing `{created:0, updated:0, unchanged:0, total:N}`.
+
+- **PostgreSQL Inserted-Flag Misparse**: The PostgreSQL driver sometimes returns the `_was_inserted` result column as the string `'t'` or `'f'` rather than a boolean. Because `Boolean('f')` evaluates to `true` in JavaScript, updates were silently miscounted as inserts. Added `parseInsertedFlag()` which explicitly normalises all truthy-string forms (`'t'`, `'true'`, `'1'`, `'y'`, `'yes'`) to `true` and everything else to `false`.
+
+- **BigInt-Safe Count Parsing**: Prisma can return `affectedRows` as a `BigInt` from MySQL and SQLite providers. Arithmetic on mixed `BigInt`/`number` values throws a `TypeError` in JavaScript. Added `toSafeNonNegativeInteger()` which converts `BigInt`, `null`, and `undefined` to a safe `number`, clamping negative results to `0`.
+
+- **Defensive Count Normalisation**: Added `normalizeUpsertCounts()` as a last-line safety check. After all provider-specific parsing, counts are clamped to non-negative values and validated against the `created + updated + unchanged === total` invariant. When a violation is detected the function corrects the values and logs an error, making anomalies visible without crashing the caller.
+
+- **Negative Count Values in Upsert Results**: Fixed `parseUpsertResults` producing negative values (e.g., `-1`) for `created`, `updated`, or `unchanged` counts. This occurred when race conditions or pre-count inconsistencies caused subtraction results to go below zero. Added `Math.max(0, ...)` guards to all subtraction-based count calculations across all four database providers (PostgreSQL, MySQL, SQLite, SQL Server).
+
+## [1.2.0] - 2026-03-12
+
+### Fixed
+
+- **Negative Count Values in Upsert Results**: Fixed `parseUpsertResults` producing negative values (e.g., `-1`) for `created`, `updated`, or `unchanged` counts. This occurred when race conditions or pre-count inconsistencies caused subtraction results to go below zero. Added `Math.max(0, ...)` guards to all subtraction-based count calculations across all four database providers (PostgreSQL, MySQL, SQLite, SQL Server).
+
+## [1.1.10] - 2026-03-12
+
+### Fixed
+
+- **PostgreSQL Upsert with @@unique Constraints**: Fixed `getUniqueConstraints()` not reading `@@unique` composite constraints defined via `uniqueFields` in Prisma's runtime model. Only `uniqueIndexes` and field-level `@unique` were being read, causing PostgreSQL error `42P10: there is no unique or exclusion constraint matching the ON CONFLICT specification`. Now reads `uniqueFields` first, then `uniqueIndexes`, then `field.isUnique`, with deduplication via `Set<string>`.
+
+## [1.1.9] - 2026-03-12
+
+### Added
+
+- **Raw SQL Upsert Optimization**: `upsertMany()` now uses single-statement raw SQL (`INSERT ... ON CONFLICT`/`ON DUPLICATE KEY`/`MERGE`) for PostgreSQL, MySQL, SQLite, and SQL Server. MongoDB continues using the legacy multi-query approach. Performance improvement: from N+M queries to 1-2 queries.
+
+- **Comprehensive upsertMany Integration Tests**: Added 17 new integration tests covering all edge cases: all creates, all updates, all unchanged, mixed operations, duplicate key deduplication, large batches, null handling, timestamp behavior, and consecutive calls.
+
+### Fixed
+
+- **PostgreSQL Duplicate Key in Batch**: Fixed "ON CONFLICT DO UPDATE command cannot affect row a second time" error when multiple items share the same unique key. Items are now deduplicated before SQL generation (last-write-wins semantics).
+
+- **MySQL Unchanged Count**: Fixed incorrect `unchanged` count in MySQL upserts. Two bugs addressed:
+  - SET clause ordering: `updatedAt` conditional now evaluated FIRST (MySQL evaluates SET left-to-right)
+  - Parsing formula: Corrected for Prisma's `CLIENT_FOUND_ROWS` flag where matched-but-unchanged rows return 1
+
+- **SQLite Timestamp Precision**: Fixed `updatedAt` comparisons failing because `datetime('now')` returns second precision while Prisma stores milliseconds. Now uses `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` for millisecond precision.
+
+- **Upsert Without @unique Fields**: Models with only `@id` (no `@unique` fields) can now use upsert operations. `getUniqueConstraints()` falls back to the primary key when no unique constraints exist.
+
+- **MongoDB Duplicate Key Processing**: Fixed items with same unique key being processed multiple times in MongoDB upserts. Added deduplication with last-write-wins semantics to `upsertManyLegacy`.
+
+- **createMany Treating All Items as Duplicates**: Fixed `deduplicateByUniqueConstraints` incorrectly treating all items as duplicates when the unique constraint field (e.g., `id`) is not provided in the data. Now skips constraints where items don't provide all field values.
+
 ## [1.1.8] - 2026-03-10
 
 ### Fixed

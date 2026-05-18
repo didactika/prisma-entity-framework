@@ -282,8 +282,8 @@ describe('Many-to-Many Relationships Integration Tests', () => {
         handleRelations: true
       });
 
-      expect(result.created).toBe(2);
-      expect(result.updated).toBe(0);
+      expect(result.counts.created).toBe(2);
+      expect(result.counts.updated).toBe(0);
 
       const subjects = await db.client.subject.findMany();
       expect(subjects).toHaveLength(2);
@@ -349,7 +349,7 @@ describe('Many-to-Many Relationships Integration Tests', () => {
 
       // Note: upsertMany may not update relations if the subject data hasn't changed
       // This is expected behavior - relations are only added during creation
-      expect(result.updated + result.created + result.unchanged).toBe(1);
+      expect(result.counts.updated + result.counts.created + result.counts.unchanged).toBe(1);
 
       subject = await db.client.subject.findFirst({ where: { name: 'Biology' } });
       relations = await getJoinTableRecords(subject!.id);
@@ -405,8 +405,8 @@ describe('Many-to-Many Relationships Integration Tests', () => {
       });
 
       // Geography should be created
-      expect(result.created).toBeGreaterThanOrEqual(1);
-      expect(result.total).toBe(2);
+      expect(result.counts.created).toBeGreaterThanOrEqual(1);
+      expect(result.counts.total).toBe(2);
 
       const subjects = await db.client.subject.findMany();
       expect(subjects).toHaveLength(2);

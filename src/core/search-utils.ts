@@ -70,6 +70,12 @@ export default  class SearchUtils {
         const output: Record<string, any> = {};
 
         for (const [key, value] of Object.entries(input)) {
+            // Explicit null → translate to Prisma { equals: null } (IS NULL filter)
+            if (value === null) {
+                ObjectUtils.assign(output, key, { equals: null });
+                continue;
+            }
+
             if (!ConditionUtils.isValid(value)) continue;
 
             const condition = this.buildDefaultCondition(value, key, modelInfo);

@@ -1,9 +1,16 @@
 import { PrismaClient } from "@prisma/client";
 import DataUtils from "./data-utils";
 import ModelUtils from "./model-utils";
-import { getPrismaInstance, isParallelEnabled } from "./config";
-import { getDatabaseProviderCached } from "./utils/database-utils";
-import { executeInParallel } from "./utils/parallel-utils";
+import {
+    getConfig,
+    getPrismaInstance,
+    isParallelEnabled,
+    type UpsertManyAfterHookPayload,
+    type UpsertManyBeforeHookPayload,
+    type UpsertManyHooks,
+    type UpsertManyResultSummary
+} from "./config";
+import { getDatabaseProviderCached, quoteIdentifier } from "./utils/database-utils";
 import { isNonEmptyArray } from "./utils/validation-utils";
 import { getOptimalBatchSize, processBatches } from "./utils/batch-utils";
 import { logError, handleUniqueConstraintError, withErrorHandling } from "./utils/error-utils";
@@ -11,8 +18,37 @@ import { executeWithOrBatching } from "./query-utils";
 import { hasChanges as compareHasChanges } from "./utils/comparison-utils";
 import BaseEntityHelpers from "./base-entity-helpers";
 import { EntityPrismaModel } from "./structures/interfaces/entity.interface";
+import {
+    executeMassivePostgresUpsert,
+    executeRawUpsertBatch,
+    getUpsertMetadata,
+    type UpsertDetailedResult
+} from "./upsert-utils";
 
 type ModelInfo = ReturnType<typeof ModelUtils.getModelInformationCached>;
+type EntityId = number | string;
+
+export type UpsertManyResult = UpsertDetailedResult;
+
+type UpsertManyRelationsContext<TModel extends object> = {
+    entityModel: EntityPrismaModel<TModel>;
+    modelInfo: ModelInfo | null;
+    normalizedItems: Record<string, unknown>[];
+    uniqueConstraints: string[][];
+    relations: Map<number, Record<string, unknown[]>>;
+    relationTypes: Map<string, "explicit" | "implicit">;
+    options?: { parallel?: boolean; concurrency?: number };
+    targetEntityIds?: Array<EntityId>;
+};
+
+type UpsertManyOptions = {
+    keyTransformTemplate?: (relationName: string) => string;
+    parallel?: boolean;
+    concurrency?: number;
+    handleRelations?: boolean;
+    useRawQuery?: boolean;
+    hooks?: UpsertManyHooks;
+};
 
 /**
  * BaseEntityBatch - Helper class for batch operations.
@@ -45,6 +81,24 @@ type ModelInfo = ReturnType<typeof ModelUtils.getModelInformationCached>;
  */
 export default class BaseEntityBatch {
     static readonly MONGODB_TRANSACTION_BATCH_SIZE = 100;
+
+    private static createEmptyUpsertManyResult(total: number): UpsertManyResult {
+        return {
+            counts: { created: 0, updated: 0, unchanged: 0, total },
+            items: { createdIds: [], updatedIds: [], unchangedIds: [] }
+        };
+    }
+
+    private static createUpsertManyResult(
+        counts: { created: number; updated: number; unchanged: number; total: number },
+        items: {
+            createdIds: Array<EntityId>;
+            updatedIds: Array<EntityId>;
+            unchangedIds: Array<EntityId>;
+        }
+    ): UpsertManyResult {
+        return { counts, items };
+    }
 
     /**
      * Create multiple entities in batch.
@@ -328,16 +382,11 @@ export default class BaseEntityBatch {
             options?: { parallel?: boolean; concurrency?: number }
         ) => Promise<number>,
         items: Partial<TModel>[],
-        options?: {
-            keyTransformTemplate?: (relationName: string) => string;
-            parallel?: boolean;
-            concurrency?: number;
-            handleRelations?: boolean;
-        }
-    ): Promise<{ created: number; updated: number; unchanged: number; total: number }> {
+        options?: UpsertManyOptions
+    ): Promise<UpsertManyResult> {
         if (!entityModel) throw new Error("Model is not defined in the BaseEntity class.");
         if (!isNonEmptyArray(items)) {
-            return { created: 0, updated: 0, unchanged: 0, total: 0 };
+            return this.createEmptyUpsertManyResult(0);
         }
 
         const modelName = entityModel.name;
@@ -377,12 +426,727 @@ export default class BaseEntityBatch {
             return DataUtils.normalizeRelationsToFK(processed, keyTransformTemplate);
         });
 
+        const hasSparseShape = (() => {
+            if (normalizedItems.length <= 1) return false;
+
+            const fieldCounts = new Map<string, number>();
+            for (const item of normalizedItems) {
+                for (const key of Object.keys(item)) {
+                    fieldCounts.set(key, (fieldCounts.get(key) ?? 0) + 1);
+                }
+            }
+
+            for (const count of fieldCounts.values()) {
+                if (count > 0 && count < normalizedItems.length) {
+                    return true;
+                }
+            }
+
+            return false;
+        })();
+
+        const prisma = getPrismaInstance();
+        const provider = getDatabaseProviderCached(prisma);
+        const config = getConfig();
+        const resolvedUseRawQuery = options?.useRawQuery ?? config.upsertManyUseRawQuery ?? true;
+
+        if (provider === 'postgresql' && modelInfo && resolvedUseRawQuery && !hasSparseShape) {
+            const beforeHookPayload: UpsertManyBeforeHookPayload = {
+                modelName: modelName!,
+                provider,
+                useRawQuery: true,
+                totalItems: items.length,
+                originalItems: items as Array<Record<string, unknown>>,
+                normalizedItems
+            };
+
+            await this.runBeforeUpsertManyHooks(config.upsertManyHooks, options?.hooks, beforeHookPayload);
+
+            const meta = getUpsertMetadata(modelName!, modelInfo);
+            const result = await executeMassivePostgresUpsert(meta, normalizedItems, prisma);
+
+            if (handleRelations && relations.size > 0 && (result.counts.created > 0 || result.counts.updated > 0)) {
+                await this.applyUpsertManyRelations(
+                    {
+                        entityModel,
+                        modelInfo,
+                        normalizedItems,
+                        uniqueConstraints,
+                        relations,
+                        relationTypes,
+                        options,
+                        targetEntityIds: [...result.items.createdIds, ...result.items.updatedIds]
+                    }
+                );
+            }
+
+            const afterHookPayload: UpsertManyAfterHookPayload = {
+                modelName: modelName!,
+                provider,
+                useRawQuery: true,
+                totalItems: items.length,
+                result: {
+                    created: {
+                        count: result.counts.created,
+                        items: result.items.createdIds
+                    },
+                    updated: {
+                        count: result.counts.updated,
+                        items: result.items.updatedIds
+                    },
+                    unchanged: {
+                        count: result.counts.unchanged,
+                        items: result.items.unchangedIds
+                    },
+                    total: result.counts.total
+                }
+            };
+
+            await this.runAfterUpsertManyHooks(config.upsertManyHooks, options?.hooks, afterHookPayload);
+            return result;
+        }
+
+        // ------------------------------------------------------------------
+        // Route: Raw SQL upsert for SQL databases, legacy path for MongoDB
+        // ------------------------------------------------------------------
+        const hasAfterHook = Boolean(config.upsertManyHooks?.after || options?.hooks?.after);
+        let effectiveUseRawQuery = provider !== "mongodb" && resolvedUseRawQuery;
+        let rawEligibleItems = normalizedItems;
+        let preProcessedCreated = 0;
+        let preProcessedUpdated = 0;
+        let preProcessedUnchanged = 0;
+        const createdItemIds: Array<EntityId> = [];
+        const updatedItemIds: Array<EntityId> = [];
+        const unchangedItemIds: Array<EntityId> = [];
+
+        if (provider !== "mongodb" && resolvedUseRawQuery && modelInfo) {
+            const missingRequiredFields = Array.from(new Set(this.getMissingRequiredRawInsertFields(modelInfo, normalizedItems)));
+            if (missingRequiredFields.length > 0) {
+                const missingFieldSet = new Set(missingRequiredFields);
+                const missingRequiredItems: Record<string, unknown>[] = [];
+                const eligibleForRaw: Record<string, unknown>[] = [];
+
+                for (const item of normalizedItems) {
+                    const hasMissingRequired = Array.from(missingFieldSet).some(fieldName => {
+                        const value = item[fieldName];
+                        return value === undefined || value === null;
+                    });
+
+                    if (hasMissingRequired) {
+                        missingRequiredItems.push(item);
+                    } else {
+                        eligibleForRaw.push(item);
+                    }
+                }
+
+                const updateOnlyResult = await this.processMissingRequiredItemsAsUpdateOnlyRaw(
+                    prisma,
+                    modelInfo,
+                    missingRequiredItems,
+                    uniqueConstraints,
+                    true
+                );
+
+                preProcessedUpdated += updateOnlyResult.updated;
+                preProcessedUnchanged += updateOnlyResult.unchanged;
+                updatedItemIds.push(...updateOnlyResult.updatedItemIds);
+                unchangedItemIds.push(...updateOnlyResult.unchangedItemIds);
+
+                if (updateOnlyResult.unresolved.length > 0) {
+                    throw new Error(
+                        `Raw upsert cannot process ${updateOnlyResult.unresolved.length} item(s) with missing required fields because no existing row matched their unique keys.`
+                    );
+                }
+
+                rawEligibleItems = eligibleForRaw;
+                effectiveUseRawQuery = rawEligibleItems.length > 0;
+            }
+        }
+
+        const beforeHookPayload: UpsertManyBeforeHookPayload = {
+            modelName: modelName!,
+            provider,
+            useRawQuery: effectiveUseRawQuery,
+            totalItems: items.length,
+            originalItems: items as Array<Record<string, unknown>>,
+            normalizedItems
+        };
+
+        await this.runBeforeUpsertManyHooks(config.upsertManyHooks, options?.hooks, beforeHookPayload);
+
+        let created = 0;
+        let updated = 0;
+        let unchanged = 0;
+        const rawHandledAllPreprocessed = provider !== "mongodb" && resolvedUseRawQuery && rawEligibleItems.length === 0;
+
+        if (provider === 'mongodb') {
+            // --- MongoDB: keep legacy multi-query approach ---
+            const legacyResult = await this.upsertManyLegacy(
+                entityModel,
+                updateManyByIdFn,
+                normalizedItems,
+                uniqueConstraints,
+                options,
+                false,
+                true
+            );
+            created = legacyResult.created;
+            updated = legacyResult.updated;
+            unchanged = legacyResult.unchanged;
+            createdItemIds.push(...legacyResult.createdItemIds);
+            updatedItemIds.push(...legacyResult.updatedItemIds);
+            unchangedItemIds.push(...legacyResult.unchangedItemIds);
+        } else if (rawHandledAllPreprocessed) {
+            // All rows were handled by raw update-only preprocessing.
+        } else if (effectiveUseRawQuery) {
+            // --- SQL databases: single-statement raw upsert ---
+            if (!modelInfo) {
+                throw new Error(`Model information is required for raw upsert on ${provider}.`);
+            }
+
+            if (rawEligibleItems.length > 0) {
+                const rawBuckets = await this.classifyRawEligibleItems(
+                    entityModel,
+                    rawEligibleItems,
+                    uniqueConstraints,
+                    options
+                );
+
+                const rawResult = await executeRawUpsertBatch(
+                    modelName!,
+                    modelInfo,
+                    rawEligibleItems,
+                    {
+                        parallel: options?.parallel,
+                        concurrency: options?.concurrency
+                    }
+                );
+
+                created = rawResult.created;
+                updated = rawResult.updated;
+                unchanged = rawResult.unchanged;
+
+                createdItemIds.push(...rawBuckets.createdItemIds);
+                if (rawBuckets.createdWhereClauses.length > 0) {
+                    const resolvedCreatedIds = await this.resolveIdsFromWhereClauses(
+                        entityModel,
+                        rawBuckets.createdWhereClauses,
+                        uniqueConstraints,
+                        options
+                    );
+                    createdItemIds.push(...resolvedCreatedIds);
+                }
+                updatedItemIds.push(...rawBuckets.updatedItemIds);
+                unchangedItemIds.push(...rawBuckets.unchangedItemIds);
+            }
+        } else {
+            // --- SQL databases with Prisma operations (middleware/extensions compatible) ---
+            const prismaOpsResult = await this.upsertManyLegacy(
+                entityModel,
+                updateManyByIdFn,
+                normalizedItems,
+                uniqueConstraints,
+                options,
+                true,
+                true
+            );
+            created = prismaOpsResult.created;
+            updated = prismaOpsResult.updated;
+            unchanged = prismaOpsResult.unchanged;
+            createdItemIds.push(...prismaOpsResult.createdItemIds);
+            updatedItemIds.push(...prismaOpsResult.updatedItemIds);
+            unchangedItemIds.push(...prismaOpsResult.unchangedItemIds);
+        }
+
+        created += preProcessedCreated;
+        updated += preProcessedUpdated;
+        unchanged += preProcessedUnchanged;
+
+        if (handleRelations && relations.size > 0 && (created > 0 || updated > 0) && provider !== 'mongodb') {
+            await this.applyUpsertManyRelations(
+                {
+                    entityModel,
+                    modelInfo,
+                    normalizedItems,
+                    uniqueConstraints,
+                    relations,
+                    relationTypes,
+                    options
+                }
+            );
+        }
+
+        if (hasAfterHook) {
+            const summary: UpsertManyResultSummary = {
+                created: {
+                    count: created,
+                    items: createdItemIds
+                },
+                updated: {
+                    count: updated,
+                    items: updatedItemIds
+                },
+                unchanged: {
+                    count: unchanged,
+                    items: unchangedItemIds
+                },
+                total: items.length
+            };
+
+            const afterHookPayload: UpsertManyAfterHookPayload = {
+                modelName: modelName!,
+                provider,
+                useRawQuery: effectiveUseRawQuery,
+                totalItems: items.length,
+                result: summary
+            };
+
+            await this.runAfterUpsertManyHooks(config.upsertManyHooks, options?.hooks, afterHookPayload);
+        }
+
+        return this.createUpsertManyResult(
+            {
+                created,
+                updated,
+                unchanged,
+                total: items.length
+            },
+            {
+                createdIds: createdItemIds,
+                updatedIds: updatedItemIds,
+                unchangedIds: unchangedItemIds
+            }
+        );
+    }
+
+    private static async applyUpsertManyRelations<TModel extends object>(
+        context: UpsertManyRelationsContext<TModel>
+    ): Promise<void> {
+        const {
+            entityModel,
+            modelInfo,
+            normalizedItems,
+            uniqueConstraints,
+            relations,
+            relationTypes,
+            options,
+            targetEntityIds
+        } = context;
+        const entityIdToIndexMap = new Map<number | string, number>();
+        const allowedEntityIds = targetEntityIds ? new Set(targetEntityIds) : null;
+
+        const orConditionsForM2M: Record<string, unknown>[] = [];
+        const indexMap = new Map<string, number>();
+
+        for (let i = 0; i < normalizedItems.length; i++) {
+            if (!relations.has(i)) continue;
+            const item = normalizedItems[i];
+            for (const constraint of uniqueConstraints) {
+                const whereClause: Record<string, unknown> = {};
+                let hasAllFields = true;
+                for (const field of constraint) {
+                    const value = item[field];
+                    if (value !== undefined && value !== null) {
+                        whereClause[field] = value;
+                    } else {
+                        hasAllFields = false;
+                        break;
+                    }
+                }
+                if (hasAllFields && Object.keys(whereClause).length > 0) {
+                    orConditionsForM2M.push(whereClause);
+                    const keyParts = constraint.map(f => `${f}:${item[f]}`);
+                    indexMap.set(keyParts.join('|'), i);
+                    break;
+                }
+            }
+        }
+
+        if (orConditionsForM2M.length > 0) {
+            try {
+                const records = await entityModel.findMany({
+                    where: { OR: orConditionsForM2M }
+                });
+                for (const record of records) {
+                    if (allowedEntityIds && !allowedEntityIds.has(record.id)) {
+                        continue;
+                    }
+
+                    for (const constraint of uniqueConstraints) {
+                        const keyParts = constraint.map(f =>
+                            `${f}:${(record as Record<string, unknown>)[f]}`
+                        );
+                        const origIdx = indexMap.get(keyParts.join('|'));
+                        if (origIdx !== undefined) {
+                            entityIdToIndexMap.set(record.id, origIdx);
+                            break;
+                        }
+                    }
+                }
+            } catch (error) {
+                logError("upsertMany - fetch IDs for M2M", error as Error);
+            }
+        }
+
+        const allEntityIds: (number | string)[] = [];
+        const remappedRelations = new Map<number, Record<string, unknown[]>>();
+
+        let newIndex = 0;
+        for (const [entityId, originalIndex] of entityIdToIndexMap.entries()) {
+            allEntityIds.push(entityId);
+            const relationData = relations.get(originalIndex);
+            if (relationData) {
+                remappedRelations.set(newIndex, relationData);
+            }
+            newIndex++;
+        }
+
+        if (allEntityIds.length > 0 && remappedRelations.size > 0) {
+            try {
+                const relationResult = await DataUtils.applyManyToManyRelations(
+                    allEntityIds,
+                    remappedRelations,
+                    entityModel.name!,
+                    modelInfo,
+                    relationTypes,
+                    {
+                        parallel: options?.parallel,
+                        concurrency: options?.concurrency
+                    }
+                );
+
+                if (relationResult.failed > 0) {
+                    logError(
+                        "upsertMany - apply relations",
+                        new Error("Failed to apply many-to-many relations"),
+                        {
+                            failedCount: relationResult.failed,
+                            successCount: relationResult.success
+                        }
+                    );
+                }
+            } catch (error) {
+                logError("upsertMany - apply relations", error as Error);
+            }
+        }
+    }
+
+    private static async runBeforeUpsertManyHooks(
+        globalHooks: UpsertManyHooks | undefined,
+        localHooks: UpsertManyHooks | undefined,
+        payload: UpsertManyBeforeHookPayload
+    ): Promise<void> {
+        const hooks = [globalHooks?.before, localHooks?.before];
+        for (const hook of hooks) {
+            if (!hook) continue;
+            await hook(payload);
+        }
+    }
+
+    private static async runAfterUpsertManyHooks(
+        globalHooks: UpsertManyHooks | undefined,
+        localHooks: UpsertManyHooks | undefined,
+        payload: UpsertManyAfterHookPayload
+    ): Promise<void> {
+        const hooks = [globalHooks?.after, localHooks?.after];
+        for (const hook of hooks) {
+            if (!hook) continue;
+            await hook(payload);
+        }
+    }
+
+    private static getMissingRequiredRawInsertFields(
+        modelInfo: ModelInfo,
+        items: Record<string, unknown>[]
+    ): string[] {
+        const requiredNoDefaultFields = (modelInfo.fields || [])
+            .filter((field: any) => field.kind === 'scalar' || field.kind === 'enum')
+            .filter((field: any) => {
+                const name = String(field.name ?? '');
+                const lowerName = name.toLowerCase();
+                const isId = Boolean(field.isId) || name === 'id';
+                const isCreatedAtLike = lowerName === 'createdat' || lowerName === 'created_at';
+                const isUpdatedAtLike = lowerName === 'updatedat' || lowerName === 'updated_at';
+                const isManagedTimestamp = Boolean(field.isUpdatedAt) || isCreatedAtLike || isUpdatedAtLike;
+                const hasRuntimeDefault = field.default !== undefined && field.default !== null;
+                const hasDefault = Boolean(field.hasDefaultValue) || hasRuntimeDefault || isId || isCreatedAtLike;
+                const isRequired = field.isRequired === true;
+
+                return !isId && isRequired && !hasDefault && !isManagedTimestamp;
+            })
+            .map((field: any) => String(field.name));
+
+        if (requiredNoDefaultFields.length === 0) {
+            return [];
+        }
+
+        const missing: string[] = [];
+        for (const item of items) {
+            for (const fieldName of requiredNoDefaultFields) {
+                if (item[fieldName] === undefined || item[fieldName] === null) {
+                    missing.push(fieldName);
+                }
+            }
+        }
+
+        return missing;
+    }
+
+    private static async processMissingRequiredItemsAsUpdateOnlyRaw(
+        prisma: PrismaClient,
+        modelInfo: ModelInfo,
+        items: Record<string, unknown>[],
+        uniqueConstraints: string[][],
+        collectItems: boolean
+    ): Promise<{
+        updated: number;
+        unchanged: number;
+        updatedItemIds: Array<EntityId>;
+        unchangedItemIds: Array<EntityId>;
+        unresolved: Record<string, unknown>[];
+    }> {
+        if (!isNonEmptyArray(items)) {
+            return { updated: 0, unchanged: 0, updatedItemIds: [], unchangedItemIds: [], unresolved: [] };
+        }
+
+        const matchableClauses: Record<string, unknown>[] = [];
+        const keyToItem = new Map<string, Record<string, unknown>>();
+        const unresolved: Record<string, unknown>[] = [];
+
+        for (const item of items) {
+            let hasMatchableUnique = false;
+            for (const constraint of uniqueConstraints) {
+                const whereClause: Record<string, unknown> = {};
+                let hasAllUniqueValues = true;
+                for (const field of constraint) {
+                    const value = item[field];
+                    if (value === undefined || value === null) {
+                        hasAllUniqueValues = false;
+                        break;
+                    }
+                    whereClause[field] = value;
+                }
+
+                if (hasAllUniqueValues && Object.keys(whereClause).length > 0) {
+                    matchableClauses.push(whereClause);
+                    const keyParts = constraint.map(field => `${field}:${item[field]}`);
+                    keyToItem.set(keyParts.join('|'), item);
+                    hasMatchableUnique = true;
+                    break;
+                }
+            }
+
+            if (!hasMatchableUnique) {
+                unresolved.push(item);
+            }
+        }
+
+        if (matchableClauses.length === 0) {
+            return { updated: 0, unchanged: 0, updatedItemIds: [], unchangedItemIds: [], unresolved };
+        }
+
+        let existingList: Array<Record<string, unknown> & { id: number | string }> = [];
+        if (matchableClauses.length > 0) {
+            try {
+                const fieldMap = new Map<string, string>();
+                for (const field of modelInfo.fields) {
+                    fieldMap.set(String((field as any).name), String((field as any).dbName || (field as any).name));
+                }
+
+                const selectableFields = new Set<string>(['id']);
+                for (const item of items) {
+                    for (const key of Object.keys(item)) selectableFields.add(key);
+                }
+                for (const constraint of uniqueConstraints) {
+                    for (const field of constraint) selectableFields.add(field);
+                }
+
+                const selectColumns = Array.from(selectableFields).map(field => {
+                    const dbName = fieldMap.get(field) || field;
+                    return `${quoteIdentifier(dbName, prisma)} AS ${quoteIdentifier(field, prisma)}`;
+                }).join(', ');
+
+                const whereChunks = matchableClauses.map(clause => {
+                    const parts = Object.entries(clause).map(([field, value]) => {
+                        const dbName = fieldMap.get(field) || field;
+                        const escaped = BaseEntityHelpers.escapeValue(value, prisma, false);
+                        return `${quoteIdentifier(dbName, prisma)} = ${escaped}`;
+                    });
+                    return `(${parts.join(' AND ')})`;
+                });
+
+                const tableName = quoteIdentifier((modelInfo as any).dbName || (modelInfo as any).name, prisma);
+                const sql = `SELECT ${selectColumns} FROM ${tableName} WHERE ${whereChunks.join(' OR ')}`;
+                const existing = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(sql);
+                existingList = Array.isArray(existing)
+                    ? existing.filter((row): row is Record<string, unknown> & { id: number | string } =>
+                        row !== null && typeof row === 'object' && row.id !== undefined)
+                    : [];
+            } catch (error) {
+                logError("upsertMany - fetch existing for missing-required update-only", error as Error);
+                for (const item of keyToItem.values()) {
+                    unresolved.push(item);
+                }
+                return { updated: 0, unchanged: 0, updatedItemIds: [], unchangedItemIds: [], unresolved };
+            }
+        }
+
+        const existingMap = new Map<string, Record<string, unknown> & { id: number | string }>();
+        for (const record of existingList) {
+            for (const constraint of uniqueConstraints) {
+                const keyParts: string[] = [];
+                let complete = true;
+                for (const field of constraint) {
+                    const value = (record as Record<string, unknown>)[field];
+                    if (value === undefined || value === null) {
+                        complete = false;
+                        break;
+                    }
+                    keyParts.push(`${field}:${value}`);
+                }
+                if (complete && keyParts.length > 0) {
+                    existingMap.set(keyParts.join('|'), record);
+                }
+            }
+        }
+
+        let updated = 0;
+        let unchanged = 0;
+        const updatedItemIds: Array<EntityId> = [];
+        const unchangedItemIds: Array<EntityId> = [];
+        const toUpdate: Array<{ id: number | string; data: Record<string, unknown> }> = [];
+
+        for (const [key, item] of keyToItem.entries()) {
+            const existingRecord = existingMap.get(key);
+            if (!existingRecord) {
+                unresolved.push(item);
+                continue;
+            }
+
+            if (!compareHasChanges(item, existingRecord as Record<string, unknown>)) {
+                unchanged++;
+                if (collectItems) unchangedItemIds.push(existingRecord.id);
+                continue;
+            }
+
+            toUpdate.push({ id: existingRecord.id, data: item });
+        }
+
+        if (toUpdate.length > 0) {
+            const fieldMap = new Map<string, string>();
+            for (const field of modelInfo.fields) {
+                fieldMap.set(String((field as any).name), String((field as any).dbName || (field as any).name));
+            }
+            const tableName = quoteIdentifier((modelInfo as any).dbName || (modelInfo as any).name, prisma);
+            const qId = quoteIdentifier('id', prisma);
+
+            try {
+                for (const row of toUpdate) {
+                    const setClauses: string[] = [];
+                    for (const [field, value] of Object.entries(row.data)) {
+                        if (field === 'id' || value === undefined) continue;
+                        const dbName = fieldMap.get(field) || field;
+                        const escaped = BaseEntityHelpers.escapeValue(value, prisma, false);
+                        setClauses.push(`${quoteIdentifier(dbName, prisma)} = ${escaped}`);
+                    }
+
+                    if (setClauses.length === 0) {
+                        unchanged++;
+                        continue;
+                    }
+
+                    const escapedId = BaseEntityHelpers.escapeValue(row.id, prisma, false);
+                    const sql = `UPDATE ${tableName} SET ${setClauses.join(', ')} WHERE ${qId} = ${escapedId}`;
+                    const result = await prisma.$executeRawUnsafe(sql);
+                    const affected = Number(result);
+                    if (Number.isFinite(affected) && affected > 0) {
+                        updated++;
+                        if (collectItems) updatedItemIds.push(row.id);
+                    } else {
+                        unresolved.push(row.data);
+                    }
+                }
+            } catch (error) {
+                logError("upsertMany - raw update existing missing-required items", error as Error);
+                for (const updateItem of toUpdate) {
+                    unresolved.push(updateItem.data);
+                }
+                updated = 0;
+            }
+        }
+
+        return {
+            updated,
+            unchanged,
+            updatedItemIds,
+            unchangedItemIds,
+            unresolved
+        };
+    }
+
+    private static async classifyRawEligibleItems<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
+        items: Record<string, unknown>[],
+        uniqueConstraints: string[][],
+        options?: { parallel?: boolean; concurrency?: number }
+    ): Promise<{
+        createdItemIds: Array<EntityId>;
+        updatedItemIds: Array<EntityId>;
+        unchangedItemIds: Array<EntityId>;
+        createdWhereClauses: Array<Record<string, unknown>>;
+    }> {
+        if (!isNonEmptyArray(items)) {
+            return { createdItemIds: [], updatedItemIds: [], unchangedItemIds: [], createdWhereClauses: [] };
+        }
+
+        // Deduplicate by first fully-matchable unique constraint (last-write-wins),
+        // while tracking removed duplicates as unchanged (same behavior as raw upsert counters).
+        const dedupMap = new Map<string, Record<string, unknown>>();
+        const duplicateItems: Array<Record<string, unknown>> = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            let dedupKey: string | null = null;
+
+            for (const constraint of uniqueConstraints) {
+                const keyParts: string[] = [];
+                let hasAllUnique = true;
+
+                for (const field of constraint) {
+                    const value = item[field];
+                    if (value === undefined || value === null) {
+                        hasAllUnique = false;
+                        break;
+                    }
+                    keyParts.push(`${field}:${String(value)}`);
+                }
+
+                if (hasAllUnique && keyParts.length > 0) {
+                    dedupKey = keyParts.join('|');
+                    break;
+                }
+            }
+
+            if (!dedupKey) {
+                dedupKey = `__row_${i}`;
+            }
+
+            if (dedupMap.has(dedupKey)) {
+                duplicateItems.push(dedupMap.get(dedupKey) as Record<string, unknown>);
+            }
+            dedupMap.set(dedupKey, item);
+        }
+
+        const dedupedItems = Array.from(dedupMap.values());
+        const createdItemIds: Array<EntityId> = [];
+        const updatedItemIds: Array<EntityId> = [];
+        const unchangedItemIds: Array<EntityId> = [];
+        const createdWhereClauses: Array<Record<string, unknown>> = [];
+
         const orConditions: Record<string, unknown>[] = [];
         const itemConstraintMap = new Map<number, Record<string, unknown>[]>();
 
-        for (let index = 0; index < normalizedItems.length; index++) {
-            const normalized = normalizedItems[index];
-
+        for (let index = 0; index < dedupedItems.length; index++) {
+            const normalized = dedupedItems[index];
             for (const constraint of uniqueConstraints) {
                 const whereClause: Record<string, unknown> = {};
                 let hasAllFields = true;
@@ -414,7 +1178,7 @@ export default class BaseEntityBatch {
         if (orConditions.length > 0) {
             try {
                 const fieldsPerCondition = uniqueConstraints[0]?.length || 1;
-                existingRecords = await executeWithOrBatching<TModel & { id: number | string }>(
+                const fetched = await executeWithOrBatching<TModel & { id: number | string }>(
                     entityModel,
                     orConditions,
                     {
@@ -423,8 +1187,237 @@ export default class BaseEntityBatch {
                         fieldsPerCondition
                     }
                 );
+                existingRecords = Array.isArray(fetched) ? fetched : [];
             } catch (error) {
-                logError("upsertMany - fetch existing records", error as Error);
+                logError("upsertMany - classify raw items", error as Error);
+            }
+        }
+
+        const existingMap = new Map<string, TModel & { id: number | string }>();
+        for (const record of existingRecords) {
+            for (const constraint of uniqueConstraints) {
+                const keyParts: string[] = [];
+                let complete = true;
+                for (const field of constraint) {
+                    const value = (record as Record<string, unknown>)[field];
+                    if (value === undefined || value === null) {
+                        complete = false;
+                        break;
+                    }
+                    keyParts.push(`${field}:${String(value)}`);
+                }
+                if (complete && keyParts.length > 0) {
+                    existingMap.set(keyParts.join('|'), record);
+                }
+            }
+        }
+
+        for (let index = 0; index < dedupedItems.length; index++) {
+            const item = dedupedItems[index];
+            const constraints = itemConstraintMap.get(index);
+            let existingRecord: (TModel & { id: number | string }) | undefined;
+
+            if (constraints) {
+                for (const constraint of constraints) {
+                    const keys = Object.keys(constraint);
+                    const keyParts: string[] = [];
+                    for (const key of keys) {
+                        keyParts.push(`${key}:${String(constraint[key])}`);
+                    }
+                    existingRecord = existingMap.get(keyParts.join('|'));
+                    if (existingRecord) break;
+                }
+            }
+
+            if (!existingRecord) {
+                if (constraints && constraints.length > 0) {
+                    createdWhereClauses.push(constraints[0]);
+                } else {
+                    const itemId = item.id;
+                    if (itemId !== undefined && itemId !== null) {
+                        createdItemIds.push(itemId as EntityId);
+                    }
+                }
+                continue;
+            }
+
+            if (compareHasChanges(item, existingRecord as Record<string, unknown>)) {
+                updatedItemIds.push(existingRecord.id);
+            } else {
+                unchangedItemIds.push(existingRecord.id);
+            }
+        }
+
+        for (const duplicate of duplicateItems) {
+            for (const constraint of uniqueConstraints) {
+                const keyParts: string[] = [];
+                let hasAllUnique = true;
+                for (const field of constraint) {
+                    const value = duplicate[field];
+                    if (value === undefined || value === null) {
+                        hasAllUnique = false;
+                        break;
+                    }
+                    keyParts.push(`${field}:${String(value)}`);
+                }
+                if (!hasAllUnique || keyParts.length === 0) continue;
+                const existingRecord = existingMap.get(keyParts.join('|'));
+                if (existingRecord) {
+                    unchangedItemIds.push(existingRecord.id);
+                }
+                break;
+            }
+        }
+
+        return { createdItemIds, updatedItemIds, unchangedItemIds, createdWhereClauses };
+    }
+
+    private static async resolveIdsFromWhereClauses<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
+        whereClauses: Array<Record<string, unknown>>,
+        uniqueConstraints: string[][],
+        options?: { parallel?: boolean; concurrency?: number }
+    ): Promise<Array<EntityId>> {
+        if (!isNonEmptyArray(whereClauses)) {
+            return [];
+        }
+
+        try {
+            const fieldsPerCondition = uniqueConstraints[0]?.length || 1;
+            const fetched = await executeWithOrBatching<TModel & { id: EntityId }>(
+                entityModel,
+                whereClauses,
+                {
+                    parallel: options?.parallel,
+                    concurrency: options?.concurrency,
+                    fieldsPerCondition
+                }
+            );
+
+            if (!Array.isArray(fetched)) {
+                return [];
+            }
+
+            const ids: Array<EntityId> = [];
+            for (const row of fetched) {
+                if (row && row.id !== undefined && row.id !== null) {
+                    ids.push(row.id);
+                }
+            }
+            return ids;
+        } catch (error) {
+            logError("upsertMany - resolve created ids", error as Error);
+            return [];
+        }
+    }
+
+    /**
+     * Legacy upsert flow for MongoDB (no raw SQL).
+     * Uses findMany + compareHasChanges + createMany + updateManyById.
+     * @internal
+     */
+    private static async upsertManyLegacy<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
+        updateManyByIdFn: (
+            dataList: Array<Partial<TModel> & { id: number | string }>,
+            options?: { parallel?: boolean; concurrency?: number }
+        ) => Promise<number>,
+        normalizedItems: Record<string, unknown>[],
+        uniqueConstraints: string[][],
+        options?: { parallel?: boolean; concurrency?: number },
+        forcePrismaOperations: boolean = false,
+        collectItems: boolean = false
+    ): Promise<{
+        created: number;
+        updated: number;
+        unchanged: number;
+        createdItemIds: Array<EntityId>;
+        updatedItemIds: Array<EntityId>;
+        unchangedItemIds: Array<EntityId>;
+    }> {
+        // Deduplicate items by unique key (last-write-wins) to prevent
+        // double-processing when the same unique key appears multiple times.
+        const dedupMap = new Map<string, { index: number; item: Record<string, unknown> }>();
+        for (let i = 0; i < normalizedItems.length; i++) {
+            const item = normalizedItems[i];
+            for (const constraint of uniqueConstraints) {
+                let hasAll = true;
+                const keyParts: string[] = [];
+                for (const field of constraint) {
+                    const val = item[field];
+                    if (val !== undefined && val !== null) {
+                        keyParts.push(`${field}:${val}`);
+                    } else {
+                        hasAll = false;
+                        break;
+                    }
+                }
+                if (hasAll && keyParts.length > 0) {
+                    dedupMap.set(keyParts.join('|'), { index: i, item });
+                    break;
+                }
+            }
+        }
+        const dedupedItems = Array.from(dedupMap.values()).map(v => v.item);
+        const duplicatesRemoved = normalizedItems.length - dedupedItems.length;
+
+        const orConditions: Record<string, unknown>[] = [];
+        const itemConstraintMap = new Map<number, Record<string, unknown>[]>();
+
+        for (let index = 0; index < dedupedItems.length; index++) {
+            const normalized = dedupedItems[index];
+            for (const constraint of uniqueConstraints) {
+                const whereClause: Record<string, unknown> = {};
+                let hasAllFields = true;
+                for (const field of constraint) {
+                    const value = normalized[field];
+                    if (value !== undefined && value !== null) {
+                        whereClause[field] = value;
+                    } else {
+                        hasAllFields = false;
+                        break;
+                    }
+                }
+                if (hasAllFields && Object.keys(whereClause).length > 0) {
+                    orConditions.push(whereClause);
+                    let constraints = itemConstraintMap.get(index);
+                    if (!constraints) {
+                        constraints = [];
+                        itemConstraintMap.set(index, constraints);
+                    }
+                    constraints.push(whereClause);
+                    break;
+                }
+            }
+        }
+
+        let existingRecords: Array<TModel & { id: number | string }> = [];
+        if (orConditions.length > 0) {
+            try {
+                const fieldsPerCondition = uniqueConstraints[0]?.length || 1;
+                const fetched = await executeWithOrBatching<TModel & { id: number | string }>(
+                    entityModel,
+                    orConditions,
+                    {
+                        parallel: options?.parallel,
+                        concurrency: options?.concurrency,
+                        fieldsPerCondition
+                    }
+                );
+
+                existingRecords = Array.isArray(fetched)
+                    ? fetched
+                    : [];
+
+                if (!Array.isArray(fetched)) {
+                    logError(
+                        "upsertManyLegacy - fetch existing records",
+                        new Error("Expected array of existing records"),
+                        { receivedType: typeof fetched }
+                    );
+                }
+            } catch (error) {
+                logError("upsertManyLegacy - fetch existing records", error as Error);
             }
         }
 
@@ -436,25 +1429,19 @@ export default class BaseEntityBatch {
                     const field = constraint[i];
                     keyParts[i] = `${field}:${(record as Record<string, unknown>)[field]}`;
                 }
-                const key = keyParts.join("|");
-                existingMap.set(key, record);
+                existingMap.set(keyParts.join("|"), record);
             }
         }
 
         const toCreate: Record<string, unknown>[] = [];
-        const toCreateIndices: number[] = [];
-        const toUpdate: Array<{
-            id: number | string;
-            data: Record<string, unknown>;
-            originalIndex: number;
-        }> = [];
+        const toUpdate: Array<{ id: number | string; data: Record<string, unknown> }> = [];
+        const unchangedItemIds: Array<EntityId> = [];
         let unchanged = 0;
 
-        for (let index = 0; index < normalizedItems.length; index++) {
-            const normalized = normalizedItems[index];
+        for (let index = 0; index < dedupedItems.length; index++) {
+            const normalized = dedupedItems[index];
             const constraints = itemConstraintMap.get(index);
             let existingRecord: (TModel & { id: number | string }) | undefined;
-
             if (constraints) {
                 for (const constraint of constraints) {
                     const constraintKeys = Object.keys(constraint);
@@ -463,177 +1450,56 @@ export default class BaseEntityBatch {
                         const field = constraintKeys[i];
                         keyParts[i] = `${field}:${constraint[field]}`;
                     }
-                    const key = keyParts.join("|");
-                    existingRecord = existingMap.get(key);
+                    existingRecord = existingMap.get(keyParts.join("|"));
                     if (existingRecord) break;
                 }
             }
-
             if (existingRecord) {
-                if (
-                    compareHasChanges(
-                        normalized as Record<string, unknown>,
-                        existingRecord as Record<string, unknown>
-                    )
-                ) {
-                    toUpdate.push({
-                        id: existingRecord.id,
-                        data: normalized,
-                        originalIndex: index
-                    });
+                if (compareHasChanges(normalized, existingRecord as Record<string, unknown>)) {
+                    toUpdate.push({ id: existingRecord.id, data: normalized });
                 } else {
                     unchanged++;
+                    if (collectItems) unchangedItemIds.push(existingRecord.id);
                 }
             } else {
                 toCreate.push(normalized);
-                toCreateIndices.push(index);
             }
         }
 
         let created = 0;
         let updated = 0;
+        const createdItemIds: Array<EntityId> = [];
+        const updatedItemIds: Array<EntityId> = [];
 
-        const useParallel =
-            options?.parallel !== false &&
-            isParallelEnabled() &&
-            (toCreate.length > 0 && toUpdate.length > 0);
-
-        if (useParallel) {
-            const operations: Array<() => Promise<number>> = [];
-
-            if (toCreate.length > 0) {
-                operations.push(async () => {
-                    const prisma = getPrismaInstance();
-                    const provider = getDatabaseProviderCached(prisma);
-                    const supportsSkipDuplicates = provider !== "sqlite" && provider !== "mongodb";
-
-                    return await withErrorHandling(
-                        async () => {
-                            const createOptions: {
-                                data: Record<string, unknown>[];
-                                skipDuplicates?: boolean;
-                            } = { data: toCreate };
-                            if (supportsSkipDuplicates) {
-                                createOptions.skipDuplicates = true;
-                            }
-                            const result = await entityModel.createMany(createOptions);
-                            return result.count;
-                        },
-                        "batch create",
-                        async () => {
-                            let count = 0;
-                            for (const data of toCreate) {
-                                try {
-                                    await entityModel.create({ data });
-                                    count++;
-                                } catch (err) {
-                                    logError("individual create", err as Error);
-                                }
-                            }
-                            return count;
-                        }
-                    );
-                });
-            }
-
-            if (toUpdate.length > 0) {
-                operations.push(async () => {
-                    return await withErrorHandling(
-                        async () => {
-                            const updateData: Array<Partial<TModel> & { id: number | string }> =
-                                toUpdate.map(({ id, data }) => ({ id, ...(data as TModel) }));
-                            return await updateManyByIdFn(updateData, { parallel: false });
-                        },
-                        "batch update",
-                        async () => {
-                            let count = 0;
-                            for (const { id, data } of toUpdate) {
-                                try {
-                                    await entityModel.update({
-                                        where: { id },
-                                        data
-                                    });
-                                    count++;
-                                } catch (err) {
-                                    logError("individual update", err as Error);
-                                }
-                            }
-                            return count;
-                        }
-                    );
-                });
-            }
-
-            const result = await executeInParallel(operations, {
-                concurrency: options?.concurrency
-            });
-
-            let resultIndex = 0;
-            if (toCreate.length > 0) {
-                created = result.results[resultIndex++] || 0;
-            }
-            if (toUpdate.length > 0) {
-                updated = result.results[resultIndex++] || 0;
-            }
-
-            if (result.errors.length > 0) {
-                logError(
-                    "upsertMany - parallel operations",
-                    new Error(`${result.errors.length} operations failed`),
-                    { failedCount: result.errors.length }
-                );
-            }
-        } else {
-            if (toCreate.length > 0) {
-                const prisma = getPrismaInstance();
-                const provider = getDatabaseProviderCached(prisma);
-                const supportsSkipDuplicates = provider !== "sqlite" && provider !== "mongodb";
-
-                created = await withErrorHandling(
-                    async () => {
-                        const createOptions: {
-                            data: Record<string, unknown>[];
-                            skipDuplicates?: boolean;
-                        } = { data: toCreate };
-                        if (supportsSkipDuplicates) {
-                            createOptions.skipDuplicates = true;
-                        }
-                        const result = await entityModel.createMany(createOptions);
-                        return result.count;
-                    },
-                    "batch create",
+        if (toUpdate.length > 0) {
+            if (forcePrismaOperations || collectItems) {
+                updated = await withErrorHandling(
                     async () => {
                         let count = 0;
-                        for (const data of toCreate) {
-                            try {
-                                await entityModel.create({ data });
-                                count++;
-                            } catch (err) {
-                                logError("individual create", err as Error);
-                            }
+                        for (const { id, data } of toUpdate) {
+                            await entityModel.update({ where: { id }, data });
+                            count++;
+                            if (collectItems) updatedItemIds.push(id);
                         }
                         return count;
-                    }
+                    },
+                    "legacy individual update"
                 );
-            }
-
-            if (toUpdate.length > 0) {
+            } else {
                 updated = await withErrorHandling(
                     async () => {
                         const updateData: Array<Partial<TModel> & { id: number | string }> =
                             toUpdate.map(({ id, data }) => ({ id, ...(data as TModel) }));
                         return await updateManyByIdFn(updateData, { parallel: false });
                     },
-                    "batch update",
+                    "legacy batch update",
                     async () => {
                         let count = 0;
                         for (const { id, data } of toUpdate) {
                             try {
-                                await entityModel.update({
-                                    where: { id },
-                                    data
-                                });
+                                await entityModel.update({ where: { id }, data });
                                 count++;
+                                if (collectItems) updatedItemIds.push(id);
                             } catch (err) {
                                 logError(`individual update for record ${id}`, err as Error);
                             }
@@ -644,131 +1510,55 @@ export default class BaseEntityBatch {
             }
         }
 
-        if (handleRelations && relations.size > 0 && (created > 0 || updated > 0)) {
-            const entityIdToIndexMap = new Map<number | string, number>();
-
-            if (created > 0 && toCreate.length > 0) {
-                const createdOrConditions = toCreate
-                    .map(item => {
-                        for (const constraint of uniqueConstraints) {
-                            const whereClause: Record<string, unknown> = {};
-                            let hasAllFields = true;
-
-                            for (const field of constraint) {
-                                const value = item[field];
-                                if (value !== undefined && value !== null) {
-                                    whereClause[field] = value;
-                                } else {
-                                    hasAllFields = false;
-                                    break;
-                                }
-                            }
-
-                            if (hasAllFields && Object.keys(whereClause).length > 0) {
-                                return whereClause;
+        if (toCreate.length > 0) {
+            if (forcePrismaOperations || collectItems) {
+                created = await withErrorHandling(
+                    async () => {
+                        let count = 0;
+                        for (const data of toCreate) {
+                            const createdRecord = await entityModel.create({ data });
+                            count++;
+                            if (collectItems && createdRecord?.id !== undefined && createdRecord?.id !== null) {
+                                createdItemIds.push(createdRecord.id);
                             }
                         }
-                        return null;
-                    })
-                    .filter(Boolean) as Record<string, unknown>[];
-
-                if (createdOrConditions.length > 0) {
-                    try {
-                        const createdRecords = await entityModel.findMany({
-                            where: { OR: createdOrConditions }
-                        });
-
-                        for (let i = 0; i < toCreate.length; i++) {
-                            const item = toCreate[i];
-                            const originalIndex = toCreateIndices[i];
-
-                            if (!relations.has(originalIndex)) {
-                                continue;
-                            }
-
-                            for (const record of createdRecords) {
-                                let matches = true;
-                                for (const constraint of uniqueConstraints) {
-                                    for (const field of constraint) {
-                                        if (
-                                            item[field] !==
-                                            (record as Record<string, unknown>)[field]
-                                        ) {
-                                            matches = false;
-                                            break;
-                                        }
-                                    }
-                                    if (matches) break;
+                        return count;
+                    },
+                    "legacy individual create"
+                );
+            } else {
+                created = await withErrorHandling(
+                    async () => {
+                        const result = await entityModel.createMany({ data: toCreate });
+                        return result.count;
+                    },
+                    "legacy batch create",
+                    async () => {
+                        let count = 0;
+                        for (const data of toCreate) {
+                            try {
+                                const createdRecord = await entityModel.create({ data });
+                                count++;
+                                if (collectItems && createdRecord?.id !== undefined && createdRecord?.id !== null) {
+                                    createdItemIds.push(createdRecord.id);
                                 }
-
-                                if (matches) {
-                                    entityIdToIndexMap.set(record.id, originalIndex);
-                                    break;
-                                }
+                            } catch (err) {
+                                logError("individual create", err as Error);
                             }
                         }
-                    } catch (error) {
-                        logError("upsertMany - fetch created IDs", error as Error);
+                        return count;
                     }
-                }
-            }
-
-            if (updated > 0 && toUpdate.length > 0) {
-                for (const item of toUpdate) {
-                    if (relations.has(item.originalIndex)) {
-                        entityIdToIndexMap.set(item.id, item.originalIndex);
-                    }
-                }
-            }
-
-            const allEntityIds: (number | string)[] = [];
-            const remappedRelations = new Map<number, Record<string, unknown[]>>();
-
-            let newIndex = 0;
-            for (const [entityId, originalIndex] of entityIdToIndexMap.entries()) {
-                allEntityIds.push(entityId);
-                const relationData = relations.get(originalIndex);
-                if (relationData) {
-                    remappedRelations.set(newIndex, relationData);
-                }
-                newIndex++;
-            }
-
-            if (allEntityIds.length > 0 && remappedRelations.size > 0) {
-                try {
-                    const relationResult = await DataUtils.applyManyToManyRelations(
-                        allEntityIds,
-                        remappedRelations,
-                        entityModel.name!,
-                        modelInfo,
-                        relationTypes,
-                        {
-                            parallel: options?.parallel,
-                            concurrency: options?.concurrency
-                        }
-                    );
-
-                    if (relationResult.failed > 0) {
-                        logError(
-                            "upsertMany - apply relations",
-                            new Error("Failed to apply many-to-many relations"),
-                            {
-                                failedCount: relationResult.failed,
-                                successCount: relationResult.success
-                            }
-                        );
-                    }
-                } catch (error) {
-                    logError("upsertMany - apply relations", error as Error);
-                }
+                );
             }
         }
 
         return {
             created,
             updated,
-            unchanged,
-            total: items.length
+            unchanged: unchanged + duplicatesRemoved,
+            createdItemIds,
+            updatedItemIds,
+            unchangedItemIds
         };
     }
 

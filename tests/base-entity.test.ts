@@ -171,7 +171,7 @@ describe('BaseEntity', () => {
 
       await user.update();
 
-      const callArgs = updateSpy.mock.calls[0][0];
+      const callArgs = updateSpy.mock.calls[0][0] as { data: Record<string, unknown> };
       expect(callArgs.data).not.toHaveProperty('createdAt');
     });
 
@@ -198,7 +198,7 @@ describe('BaseEntity', () => {
 
       await user.update();
 
-      const callArgs = updateSpy.mock.calls[0][0];
+      const callArgs = updateSpy.mock.calls[0][0] as { data: Record<string, unknown> };
       expect(callArgs.data).not.toHaveProperty('updatedAt');
     });
 
@@ -225,7 +225,7 @@ describe('BaseEntity', () => {
 
       await user.update();
 
-      const callArgs = updateSpy.mock.calls[0][0];
+      const callArgs = updateSpy.mock.calls[0][0] as { data: Record<string, unknown> };
       expect(callArgs.data).not.toHaveProperty('emptyField');
     });
   });

@@ -187,12 +187,12 @@ describe('SearchUtils', () => {
     });
 
     /**
-     * Test: should skip null values
+     * Test: should translate null values to { equals: null } (IS NULL filter)
      */
-    it('should skip null values', () => {
+    it('should translate null values to { equals: null }', () => {
       const input = { name: null };
       const result = SearchUtils.applyDefaultFilters(input);
-      expect(result).toEqual({});
+      expect(result).toEqual({ name: { equals: null } });
     });
 
     /**

@@ -11,6 +11,18 @@ datasource db {
   url      = env("DATABASE_URL_MONGODB")
 }
 
+enum TaskStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
 model User {
   id        String    @id @default(auto()) @map("_id") @db.ObjectId
   name      String
@@ -67,4 +79,15 @@ model Job {
   payload      String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+}
+
+model TaskItem {
+  id          String       @id @default(auto()) @map("_id") @db.ObjectId
+  code        String       @unique
+  title       String
+  status      TaskStatus
+  priority    TaskPriority?
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 }

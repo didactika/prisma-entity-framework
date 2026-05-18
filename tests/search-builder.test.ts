@@ -508,7 +508,7 @@ describe('SearchBuilder', () => {
       expect(result.OR).toHaveLength(2);
       expect(result.OR[0]).toHaveProperty('scheduledFor');
       expect(result.OR[0].scheduledFor).toHaveProperty('lte');
-      expect(result.OR[1]).toEqual({ scheduledFor: null });
+      expect(result.OR[1]).toEqual({ scheduledFor: { equals: null } });
     });
 
     /**
@@ -558,7 +558,7 @@ describe('SearchBuilder', () => {
       expect(result).toHaveProperty('OR');
       expect(result.OR).toHaveLength(2);
       expect(result.OR[0]).toEqual({ age: { gte: 18, lte: 65 } });
-      expect(result.OR[1]).toEqual({ age: null });
+      expect(result.OR[1]).toEqual({ age: { equals: null } });
     });
 
     /**
@@ -576,7 +576,7 @@ describe('SearchBuilder', () => {
       expect(result).toHaveProperty('OR');
       expect(result.OR).toHaveLength(2);
       expect(result.OR[0].createdAt).toHaveProperty('gte');
-      expect(result.OR[1]).toEqual({ createdAt: null });
+      expect(result.OR[1]).toEqual({ createdAt: { equals: null } });
     });
 
     /**
@@ -594,6 +594,45 @@ describe('SearchBuilder', () => {
       expect(result.status).toBe('PENDING');
       expect(result).toHaveProperty('OR');
       expect(result.OR).toHaveLength(2);
+    });
+
+    it('should not add not:null for required DateTime field when modelInfo is provided', () => {
+      const modelInfo = {
+        fields: [
+          { name: 'createdAt', kind: 'scalar', isRequired: true }
+        ]
+      };
+
+      const result = SearchBuilder.build({}, {
+        rangeSearch: [{
+          keys: ['createdAt'],
+          max: new Date('2026-03-13')
+        }]
+      }, modelInfo);
+
+      expect(result.createdAt).toHaveProperty('lte');
+      expect(result.createdAt).not.toHaveProperty('not');
+    });
+
+    it('should add not:null for nullable DateTime field when modelInfo is provided', () => {
+      const modelInfo = {
+        fields: [
+          { name: 'scheduledFor', kind: 'scalar', isRequired: false }
+        ]
+      };
+
+      const result = SearchBuilder.build({}, {
+        rangeSearch: [{
+          keys: ['scheduledFor'],
+          max: new Date('2026-03-13')
+        }]
+      }, modelInfo);
+
+      expect(result).toHaveProperty('scheduledFor');
+      expect(result.scheduledFor).toEqual({
+        lte: new Date('2026-03-13'),
+        not: null
+      });
     });
   });
 });

@@ -1,6 +1,7 @@
 import {FindByFilterOptions} from "./structures/types/search.types";
 import ConditionUtils from "./condition-utils";
 import ObjectUtils from "./object-utils";
+import { getPrismaInstance } from "./config";
 
 /**
  * SearchBuilder class for constructing complex search filters
@@ -78,12 +79,7 @@ export default class SearchBuilder {
 
             if (!ConditionUtils.isValid(condition)) continue;
 
-            // For range conditions without includeNull, explicitly exclude nulls
-            // (MongoDB includes nulls in lte/gte comparisons unlike SQL databases)
             const isRangeCondition = typeof condition === 'object' && condition !== null && (condition.gte !== undefined || condition.lte !== undefined);
-            if (!includeNull && isRangeCondition) {
-                condition.not = null;
-            }
 
             // If includeNull is true, create OR with condition and null
             if (includeNull && keys.length > 0) {
@@ -93,23 +89,94 @@ export default class SearchBuilder {
                     // Add the original condition
                     filter.OR.push(ObjectUtils.buildWithRelations(path, condition, modelInfo));
                     // Add the null condition
-                    filter.OR.push(ObjectUtils.buildWithRelations(path, null, modelInfo));
+                    filter.OR.push(ObjectUtils.buildWithRelations(path, { equals: null }, modelInfo));
                     orPaths.add(path);
                 }
             } else if (grouping === "or") {
                 filter.OR = filter.OR ?? [];
 
                 for (const path of keys) {
-                    filter.OR.push(ObjectUtils.buildWithRelations(path, condition, modelInfo));
+                    const conditionWithNullExclusion = this.buildConditionWithNullExclusion(path, condition, isRangeCondition, includeNull, modelInfo);
+                    filter.OR.push(ObjectUtils.buildWithRelations(path, conditionWithNullExclusion, modelInfo));
                     orPaths.add(path);
                 }
             } else {
                 for (const path of keys) {
-                    ObjectUtils.assign(filter, path, condition, modelInfo);
+                    const conditionWithNullExclusion = this.buildConditionWithNullExclusion(path, condition, isRangeCondition, includeNull, modelInfo);
+                    ObjectUtils.assign(filter, path, conditionWithNullExclusion, modelInfo);
                 }
             }
         }
 
         ObjectUtils.clean(filter, orPaths);
+    }
+
+    private static buildConditionWithNullExclusion(
+        path: string,
+        condition: any,
+        isRangeCondition: boolean,
+        includeNull: boolean,
+        modelInfo?: any
+    ): any {
+        if (!isRangeCondition || includeNull) {
+            return condition;
+        }
+
+        if (this.shouldExcludeNull(path, modelInfo)) {
+            return { ...condition, not: null };
+        }
+
+        return condition;
+    }
+
+    private static shouldExcludeNull(path: string, modelInfo?: any): boolean {
+        if (!modelInfo) {
+            return true;
+        }
+
+        const fieldInfo = this.getFieldInfoForPath(path, modelInfo);
+        if (!fieldInfo) {
+            return false;
+        }
+
+        return fieldInfo.isRequired === false;
+    }
+
+    private static getFieldInfoForPath(path: string, modelInfo: any): any | null {
+        const keys = path.split('.');
+        let currentModelInfo = modelInfo;
+
+        for (let index = 0; index < keys.length; index++) {
+            const key = keys[index];
+            const field = currentModelInfo?.fields?.find((f: any) => f.name === key);
+
+            if (!field) {
+                return null;
+            }
+
+            if (index === keys.length - 1) {
+                return field;
+            }
+
+            if (field.kind !== 'object') {
+                return null;
+            }
+
+            currentModelInfo = this.getRelatedModelInfo(field.type);
+            if (!currentModelInfo) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private static getRelatedModelInfo(modelName: string): any | null {
+        try {
+            const prisma = getPrismaInstance() as any;
+            return prisma?._runtimeDataModel?.models?.[modelName] ?? null;
+        } catch {
+            return null;
+        }
     }
 }
