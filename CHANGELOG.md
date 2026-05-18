@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-05-18
+
+### Fixed
+
+- **Null filter values silently ignored in `findByFilter`, `countByFilter`, and `deleteByFilter`**: `applyDefaultFilters()` was discarding fields with `null` values because `isValidValue(null)` returns `false`. Any filter like `{ deletedAt: null }` was silently stripped before reaching Prisma, causing all records to match instead of only those where the field `IS NULL`. Null values are now translated to `{ equals: null }`, which Prisma interprets as an `IS NULL` condition.
+
+### Added
+
+- **Integration tests for null filter behavior** (`tests/integration/null-filter.integration.test.ts`): 9 tests covering `countByFilter`, `findByFilter`, and `deleteByFilter` with `null` values on nullable fields, including combined null + non-null filter conditions.
+
+### Fixed
+
+- **Broken import paths in benchmark test** (`tests/benchmarks/parallel-performance.benchmark.test.ts`): Corrected stale module paths (`../../src/base-entity`, `../../src/config`, `../utils/test-db`) to their actual locations in the source tree.
+
 ## [2.0.0] - 2026-03-25
 
 ### Changed
