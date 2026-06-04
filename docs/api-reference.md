@@ -23,6 +23,88 @@ Reset configuration (useful for testing).
 
 ---
 
+### Transactions
+
+#### `runTransaction<T>(fn, options?): Promise<T>`
+Execute multiple entity operations inside a Prisma interactive transaction. All operations within the callback are atomic — if any operation fails, all changes are rolled back.
+
+**Parameters:**
+- `fn` - Async callback that receives a `TransactionClient` (`tx`)
+- `options.maxWait` - Max time (ms) to acquire a connection (default: 2000)
+- `options.timeout` - Max time (ms) for the transaction to complete (default: 5000)
+- `options.isolationLevel` - Transaction isolation level (PostgreSQL, MySQL, SQL Server)
+
+**Returns:** The value returned by the callback
+
+```typescript
+import { runTransaction } from 'prisma-entity-framework';
+
+// Implicit mode: operations auto-detect the active transaction
+const user = await runTransaction(async (tx) => {
+    const u = new User({ name: 'John', email: 'john@example.com' });
+    await u.create();           // uses active transaction automatically
+
+    const p = new Post({ title: 'Hello', authorId: u.id });
+    await p.create();           // same transaction
+
+    return u;
+});
+
+// Explicit mode: pass tx directly
+const user = await runTransaction(async (tx) => {
+    const u = new User({ name: 'John', email: 'john@example.com' });
+    await u.create({ tx });     // explicit transaction client
+
+    return u;
+}, {
+    maxWait: 5000,
+    timeout: 10000,
+    isolationLevel: 'Serializable'
+});
+```
+
+#### `getActiveTransaction(): TransactionClient | null`
+Returns the currently active transactional client, or `null` if not inside a transaction.
+
+```typescript
+const tx = getActiveTransaction();
+if (tx) {
+    // We are inside a runTransaction() callback
+}
+```
+
+#### `isInTransaction(): boolean`
+Returns `true` when called inside a `runTransaction()` callback.
+
+```typescript
+if (isInTransaction()) {
+    console.log('Running inside a transaction');
+}
+```
+
+#### Transaction-aware operations
+
+All BaseEntity methods accept an optional `tx` parameter via `EntityOperationOptions`:
+
+```typescript
+// Instance methods
+await entity.create({ tx });
+await entity.update({ tx });
+await entity.delete({ tx });
+
+// Static methods
+await User.createMany(items, { tx });
+await User.updateManyById(dataList, { tx });
+await User.upsertMany(items, { tx });
+await User.upsert(data, { tx });
+await User.deleteByFilter(filter, { tx });
+await User.deleteByIds(ids, { tx });
+await User.findByFilter(filter, { tx });
+await User.countByFilter(filter, { tx });
+```
+
+> **Note:** Parallel batch execution is automatically disabled inside transactions to prevent deadlocks.
+
 ### BaseEntity Static Methods
 
 #### `findByFilter<T>(filter, options?): Promise<T[] | PaginatedResponse<T>>`

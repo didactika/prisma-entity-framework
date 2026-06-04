@@ -1,4 +1,4 @@
-import { IBaseEntity } from "./structures/interfaces/base-entity.interface";
+import { IBaseEntity, EntityOperationOptions } from "./structures/interfaces/base-entity.interface";
 import { FindByFilterOptions } from "./structures/types/search.types";
 import DataUtils from "./data-utils";
 import ModelUtils from "./model-utils";
@@ -9,6 +9,8 @@ import BaseEntityQuery from "./base-entity-query";
 import BaseEntityHelpers from "./base-entity-helpers";
 import { EntityPrismaModel } from "./structures/interfaces/entity.interface";
 import type { UpsertManyHooks } from "./config";
+import type { TransactionClient } from "./transaction-context";
+import { resolveModel } from "./utils/transaction-utils";
 
 interface BaseEntityCtor<TModel extends object> {
     new(...args: any[]): BaseEntity<TModel>;
@@ -125,7 +127,7 @@ export default abstract class BaseEntity<
         filter: FindByFilterOptions.FilterInput<TModel>,
         options: FindByFilterOptions.Options = FindByFilterOptions.defaultOptions
     ): Promise<FindByFilterOptions.PaginatedResponse<TModel> | TModel[] | TModel | null> {
-        const entityModel = this.model;
+        const entityModel = resolveModel(this.model, options.tx);
         const getModelInformation = () => this.getModelInformation();
 
         return BaseEntityQuery.findByFilter<TModel>(
@@ -143,9 +145,10 @@ export default abstract class BaseEntity<
      */
     public static async countByFilter<TModel extends object>(
         this: BaseEntityCtor<TModel>,
-        filter: Partial<TModel>
+        filter: Partial<TModel>,
+        options?: EntityOperationOptions
     ): Promise<number> {
-        const entityModel = this.model;
+        const entityModel = resolveModel(this.model, options?.tx);
         const getModelInformation = () => this.getModelInformation();
 
         return BaseEntityQuery.countByFilter<TModel>(
@@ -170,6 +173,13 @@ export default abstract class BaseEntity<
             | TModel
             | null
         >;
+    }
+
+    public async countByFilter(
+        filter: Partial<TModel>,
+        options?: EntityOperationOptions
+    ): Promise<number> {
+        return (this.constructor as any).countByFilter(filter, options) as Promise<number>;
     }
 
     /**
@@ -234,7 +244,7 @@ export default abstract class BaseEntity<
      * const created = await user.create();
      * ```
      */
-    async create(): Promise<TModel> {
+    async create(options?: EntityOperationOptions): Promise<TModel> {
         const { model } = this.constructor as BaseEntityCtor<TModel>;
 
         // Type guard: check if model has create method
@@ -246,7 +256,7 @@ export default abstract class BaseEntity<
             throw new Error("Model is not defined in the BaseEntity class.");
         }
 
-        const typedModel = model as EntityPrismaModel<TModel>;
+        const typedModel = resolveModel(model as EntityPrismaModel<TModel>, options?.tx);
 
         // Get model information for relation processing
         let modelInfo: ReturnType<typeof ModelUtils.getModelInformationCached> | null =
@@ -279,9 +289,10 @@ export default abstract class BaseEntity<
             parallel?: boolean;
             concurrency?: number;
             handleRelations?: boolean;
+            tx?: TransactionClient;
         }
     ): Promise<number> {
-        const entityModel = this.model;
+        const entityModel = resolveModel(this.model, options?.tx);
         const getModelInformation = () => this.getModelInformation();
 
         return BaseEntityBatch.createMany<TModel>(
@@ -313,6 +324,7 @@ export default abstract class BaseEntity<
         data: Partial<TModel>,
         options?: {
             keyTransformTemplate?: (relationName: string) => string;
+            tx?: TransactionClient;
         }
     ): Promise<TModel> {
         const entityModel = this.model;
@@ -322,18 +334,17 @@ export default abstract class BaseEntity<
             throw new Error("Model is not defined in the BaseEntity class.");
         }
 
-        const typedModel = entityModel;
-
         if (
-            typeof typedModel.name !== "string" ||
-            typeof typedModel.findFirst !== "function" ||
-            typeof typedModel.update !== "function" ||
-            typeof typedModel.create !== "function"
+            typeof entityModel.name !== "string" ||
+            typeof entityModel.findFirst !== "function" ||
+            typeof entityModel.update !== "function" ||
+            typeof entityModel.create !== "function"
         ) {
             throw new Error("Model is not defined in the BaseEntity class.");
         }
 
-        const modelName = typedModel.name;
+        const typedModel = resolveModel(entityModel, options?.tx);
+        const modelName = entityModel.name;
 
         // Use ModelUtils to get unique constraints
         const uniqueConstraints = ModelUtils.getUniqueConstraints(modelName);
@@ -485,9 +496,10 @@ export default abstract class BaseEntity<
             handleRelations?: boolean;
             useRawQuery?: boolean;
             hooks?: UpsertManyHooks;
+            tx?: TransactionClient;
         }
     ): Promise<UpsertManyResult> {
-        const entityModel = this.model;
+        const entityModel = resolveModel(this.model, options?.tx);
         const getModelInformation = () => this.getModelInformation();
         const updateManyByIdFn = (
             dataList: Array<Partial<TModel>>,
@@ -543,7 +555,7 @@ export default abstract class BaseEntity<
      * await user.update();
      * ```
      */
-    async update(): Promise<TModel> {
+    async update(options?: EntityOperationOptions): Promise<TModel> {
         const thisRecord = this as Record<string, unknown>;
         const id = thisRecord.id;
 
@@ -564,7 +576,7 @@ export default abstract class BaseEntity<
             throw new Error("Model is not defined in the BaseEntity class.");
         }
 
-        const typedModel = model as EntityPrismaModel<TModel>;
+        const typedModel = resolveModel(model as EntityPrismaModel<TModel>, options?.tx);
 
         // Get model information for relation processing
         let modelInfo: ReturnType<typeof ModelUtils.getModelInformationCached> | null =
@@ -595,9 +607,10 @@ export default abstract class BaseEntity<
         options?: {
             parallel?: boolean;
             concurrency?: number;
+            tx?: TransactionClient;
         }
     ): Promise<number> {
-        const entityModel = this.model;
+        const entityModel = resolveModel(this.model, options?.tx);
         const getModelInformation = () => this.getModelInformation();
 
         return BaseEntityBatch.updateManyById(
@@ -622,7 +635,7 @@ export default abstract class BaseEntity<
      * await user.delete();
      * ```
      */
-    async delete(): Promise<number | string> {
+    async delete(options?: EntityOperationOptions): Promise<number | string> {
         // Type guard: ensure id is number or string
         if (typeof this.id !== "number" && typeof this.id !== "string") {
             throw new Error("Cannot delete: Missing primary key (id)");
@@ -639,7 +652,7 @@ export default abstract class BaseEntity<
             throw new Error("The model is not defined in the child class of BaseEntity.");
         }
 
-        const typedModel = model as {
+        const typedModel = resolveModel(model as EntityPrismaModel<TModel>, options?.tx) as {
             delete: (args: { where: { id: number | string } }) => Promise<unknown>;
         };
 
@@ -655,9 +668,9 @@ export default abstract class BaseEntity<
     public static async deleteByFilter<TModel extends object>(
         this: BaseEntityCtor<TModel>,
         filter: Partial<TModel>,
-        options?: FindByFilterOptions.Options
+        options?: FindByFilterOptions.Options & EntityOperationOptions
     ): Promise<number> {
-        const entityModel = this.model;
+        const entityModel = resolveModel(this.model, options?.tx);
         const getModelInformation = () => this.getModelInformation();
 
         return BaseEntityQuery.deleteByFilter<TModel>(
@@ -687,9 +700,10 @@ export default abstract class BaseEntity<
         options?: {
             parallel?: boolean;
             concurrency?: number;
+            tx?: TransactionClient;
         }
     ): Promise<number> {
-        const entityModel = this.model;
+        const entityModel = resolveModel(this.model, options?.tx);
 
         return BaseEntityBatch.deleteByIds(entityModel, ids, options);
     }
