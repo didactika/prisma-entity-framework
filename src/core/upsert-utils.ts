@@ -6,6 +6,7 @@ import { logError, withErrorHandling } from "./utils/error-utils";
 import { isNonEmptyArray } from "./utils/validation-utils";
 import BaseEntityHelpers from "./base-entity-helpers";
 import ModelUtils from "./model-utils";
+import { resolvePrismaForRaw, shouldDisableParallel } from "./utils/transaction-utils";
 
 type ModelInfo = ReturnType<typeof ModelUtils.getModelInformationCached>;
 
@@ -980,8 +981,8 @@ export async function executeRawUpsertBatch(
         return { created: 0, updated: 0, unchanged: 0 };
     }
 
-    const prisma = getPrismaInstance();
-    const provider = getDatabaseProviderCached(prisma);
+    const prisma = resolvePrismaForRaw() as unknown as PrismaClient;
+    const provider = getDatabaseProviderCached(getPrismaInstance());
     const meta = getUpsertMetadata(modelName, modelInfo);
     const dedupedItems = deduplicateByUniqueKey(items, meta.uniqueConflictColumns);
     const duplicatesRemoved = items.length - dedupedItems.length;
@@ -1024,7 +1025,7 @@ export async function executeRawUpsertBatch(
                 );
             },
             {
-                parallel: options?.parallel !== false,
+                parallel: options?.parallel !== false && !shouldDisableParallel(),
                 concurrency: options?.concurrency
             }
         );

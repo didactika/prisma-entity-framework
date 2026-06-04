@@ -7,6 +7,7 @@ import { executeWithOrBatching, deduplicateResults } from "./query-utils";
 import { executeInParallel } from "./utils/parallel-utils";
 import { isParallelEnabled } from "./config";
 import { EntityPrismaModel } from "./structures/interfaces/entity.interface";
+import { shouldDisableParallel } from "./utils/transaction-utils";
 
 type ModelInfo = ReturnType<typeof ModelUtils.getModelInformationCached>;
 
@@ -183,7 +184,7 @@ export default class BaseEntityQuery {
             }
 
             const useParallel =
-                options.parallel !== false && isParallelEnabled() && chunks.length > 1;
+                options.parallel !== false && isParallelEnabled() && chunks.length > 1 && !shouldDisableParallel();
 
             let allResults: TModel[][];
 

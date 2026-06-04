@@ -35,6 +35,22 @@ export {
 } from './core/config';
 
 /**
+ * Transactions
+ * 
+ * Transaction support for grouping multiple entity operations atomically:
+ * - runTransaction: Execute operations within a Prisma interactive transaction
+ * - getActiveTransaction: Get the currently active transactional client
+ * - isInTransaction: Check if running inside a transaction
+ */
+export {
+    runTransaction,
+    getActiveTransaction,
+    isInTransaction,
+    type TransactionClient,
+    type TransactionOptions
+} from './core/transaction-context';
+
+/**
  * Rate Limiter
  * 
  * Rate limiting for API and database operations:

@@ -1,3 +1,5 @@
+import type { TransactionClient } from '../../transaction-context';
+
 export namespace FindByFilterOptions {
     export type StringSearch = {
         keys?: string[];
@@ -61,6 +63,8 @@ export namespace FindByFilterOptions {
         parallel?: boolean;
         concurrency?: number;
         rateLimit?: number;
+        /** Explicit transactional client for running inside a transaction */
+        tx?: TransactionClient;
     };
 
     export const defaultOptions: Options = {

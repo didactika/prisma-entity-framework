@@ -24,6 +24,7 @@ import {
     getUpsertMetadata,
     type UpsertDetailedResult
 } from "./upsert-utils";
+import { shouldDisableParallel, resolvePrismaForRaw } from "./utils/transaction-utils";
 
 type ModelInfo = ReturnType<typeof ModelUtils.getModelInformationCached>;
 type EntityId = number | string;
@@ -181,7 +182,7 @@ export default class BaseEntityBatch {
         }
 
         const batchSize = getOptimalBatchSize("createMany", provider);
-        const useParallel = options?.parallel !== false && isParallelEnabled();
+        const useParallel = options?.parallel !== false && isParallelEnabled() && !shouldDisableParallel();
 
         const result = await processBatches(
             deduplicatedData,
@@ -445,8 +446,8 @@ export default class BaseEntityBatch {
             return false;
         })();
 
-        const prisma = getPrismaInstance();
-        const provider = getDatabaseProviderCached(prisma);
+        const prisma = resolvePrismaForRaw() as unknown as PrismaClient;
+        const provider = getDatabaseProviderCached(getPrismaInstance());
         const config = getConfig();
         const resolvedUseRawQuery = options?.useRawQuery ?? config.upsertManyUseRawQuery ?? true;
 
@@ -1596,8 +1597,8 @@ export default class BaseEntityBatch {
     ): Promise<number> {
         if (!isNonEmptyArray(dataList)) return 0;
 
-        const prisma = getPrismaInstance();
-        const provider = getDatabaseProviderCached(prisma);
+        const prisma = resolvePrismaForRaw() as unknown as PrismaClient;
+        const provider = getDatabaseProviderCached(getPrismaInstance());
         const modelInfo = getModelInformation();
         const tableName = (modelInfo as any).dbName || modelInfo.name || entityModel?.name;
 
@@ -1612,7 +1613,7 @@ export default class BaseEntityBatch {
         }
 
         const batchSize = getOptimalBatchSize("updateMany", provider);
-        const useParallel = options?.parallel !== false && isParallelEnabled();
+        const useParallel = options?.parallel !== false && isParallelEnabled() && !shouldDisableParallel();
 
         const result = await processBatches(
             formattedList,
@@ -1744,7 +1745,7 @@ export default class BaseEntityBatch {
         if (!isNonEmptyArray(ids)) return 0;
 
         const batchSize = getOptimalBatchSize("delete");
-        const useParallel = options?.parallel !== false && isParallelEnabled();
+        const useParallel = options?.parallel !== false && isParallelEnabled() && !shouldDisableParallel();
 
         const result = await processBatches(
             ids,

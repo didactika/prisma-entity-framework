@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-04
+
+### Added
+
+- **Full Prisma Transaction Support**: You can now execute multiple operations atomically within a transaction using the new `runTransaction` API. If any operation fails, all changes are rolled back.
+- **Implicit and Explicit Transaction Context**: 
+  - **Implicit mode**: Powered by Node's `AsyncLocalStorage`, any `BaseEntity` operation executed inside `runTransaction()` callback will automatically participate in the active transaction without needing to explicitly pass the transaction client (`tx`).
+  - **Explicit mode**: You can pass the `{ tx }` option directly to any entity operation for complete manual control.
+- **New Transaction APIs** exported from the main entry point:
+  - `runTransaction<T>(fn, options?)`: Executes the callback within an interactive transaction.
+  - `getActiveTransaction()`: Returns the currently active transaction client, or `null`.
+  - `isInTransaction()`: Helper to check if execution is currently inside a transaction context.
+- **Transaction-aware Entity Operations**: All `BaseEntity` instance and static methods now accept an optional `tx` property via the new `EntityOperationOptions` interface:
+  - Instance methods: `create`, `update`, `delete`
+  - Static methods: `createMany`, `upsert`, `upsertMany`, `updateManyById`, `deleteByFilter`, `deleteByIds`, `findByFilter`, `countByFilter`
+- **Transaction Safety in Batch Operations**: Parallel execution is now automatically disabled when running inside a transaction to prevent connection pool exhaustion and deadlocks.
+- **Transaction Support in Raw Queries**: Internal methods that execute raw queries (`executeMassivePostgresUpsert`, `updateManyById`, etc.) now correctly resolve the active transaction client and run as part of the overarching transaction.
 ## [2.0.1] - 2026-05-18
 
 ### Fixed
