@@ -1,6 +1,12 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { getPrismaInstance } from './config';
+
+export type TransactionIsolationLevel =
+    | 'ReadUncommitted'
+    | 'ReadCommitted'
+    | 'RepeatableRead'
+    | 'Serializable';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,7 +45,7 @@ export interface TransactionOptions {
      * Transaction isolation level.
      * Only supported by PostgreSQL, MySQL and SQL Server.
      */
-    isolationLevel?: Prisma.TransactionIsolationLevel;
+    isolationLevel?: TransactionIsolationLevel;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,18 +112,18 @@ export async function runTransaction<T>(
     const txOptions: {
         maxWait?: number;
         timeout?: number;
-        isolationLevel?: Prisma.TransactionIsolationLevel;
+        isolationLevel?: TransactionIsolationLevel;
     } = {};
 
     if (options?.maxWait !== undefined) txOptions.maxWait = options.maxWait;
     if (options?.timeout !== undefined) txOptions.timeout = options.timeout;
     if (options?.isolationLevel !== undefined) txOptions.isolationLevel = options.isolationLevel;
 
-    return prisma.$transaction(async (tx) => {
+    return prisma.$transaction(async (tx: any) => {
         // Run the user callback inside the AsyncLocalStorage context
         // so that all entity operations automatically pick up `tx`.
         return transactionStorage.run(tx as unknown as TransactionClient, () => fn(tx as unknown as TransactionClient));
-    }, txOptions);
+    }, txOptions as any) as Promise<T>;
 }
 
 /**

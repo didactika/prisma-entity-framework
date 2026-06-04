@@ -978,7 +978,7 @@ export default class BaseEntityBatch {
 
                 const tableName = quoteIdentifier((modelInfo as any).dbName || (modelInfo as any).name, prisma);
                 const sql = `SELECT ${selectColumns} FROM ${tableName} WHERE ${whereChunks.join(' OR ')}`;
-                const existing = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(sql);
+                const existing = (await prisma.$queryRawUnsafe(sql)) as Array<Record<string, unknown>>;
                 existingList = Array.isArray(existing)
                     ? existing.filter((row): row is Record<string, unknown> & { id: number | string } =>
                         row !== null && typeof row === 'object' && row.id !== undefined)
