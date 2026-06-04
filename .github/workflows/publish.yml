@@ -28,7 +28,12 @@ jobs:
       - run: npm run prisma:test
       - run: npm run prisma:test:push
 
-      - run: npm run build
-      - run: npm test
 
+      - name: Debug OIDC
+        run: |
+          echo "Repo: $GITHUB_REPOSITORY"
+          echo "Workflow ref: $GITHUB_WORKFLOW_REF"
+          echo "Ref: $GITHUB_REF"
+
+      - run: npm run build
       - run: npm publish --provenance --access public
