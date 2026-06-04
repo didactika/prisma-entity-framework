@@ -794,7 +794,7 @@ export async function executeMassivePostgresUpsert(
         return `${q(col.dbName, prisma)} = s.${q(col.dbName, prisma)}`;
     }).join(', ');
 
-    return await prisma.$transaction(async (tx) => {
+    return await prisma.$transaction(async (tx: any) => {
         let tempTableCreated = false;
 
         try {
@@ -872,11 +872,11 @@ export async function executeMassivePostgresUpsert(
                 `;
             }
 
-            const result = await tx.$queryRawUnsafe<Array<{
+            const result = (await tx.$queryRawUnsafe(superQuery)) as Array<{
                 unchanged_ids: unknown;
                 updated_ids: unknown;
                 inserted_ids: unknown;
-            }>>(superQuery);
+            }>;
             const row = result[0] ?? { unchanged_ids: [], updated_ids: [], inserted_ids: [] };
 
             const unchangedIds = parseJsonIdArray(row.unchanged_ids);
@@ -1006,7 +1006,7 @@ export async function executeRawUpsertBatch(
 
                         if (needsPreCount) {
                             const countQuery = buildPreCountQuery(meta, batch, prisma);
-                            const countResult = await prisma.$queryRawUnsafe<Array<{ cnt: unknown }>>(countQuery);
+                            const countResult = (await prisma.$queryRawUnsafe(countQuery)) as Array<{ cnt: unknown }>;
                             existingCount = Number(countResult?.[0]?.cnt ?? 0);
                         }
 

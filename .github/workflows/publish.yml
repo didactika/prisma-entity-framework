@@ -12,6 +12,9 @@ jobs:
       contents: read
       id-token: write
 
+    env:
+      DATABASE_URL: "file:./test.db"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -21,6 +24,11 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - run: npm ci
+
+      - run: npm run prisma:test
+      - run: npm run prisma:test:push
+
+      - run: npm run build
       - run: npm test
 
       - run: npm publish --provenance --access public
