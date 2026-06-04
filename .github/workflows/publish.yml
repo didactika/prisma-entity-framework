@@ -9,8 +9,8 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       id-token: write
+      contents: read
 
     env:
       DATABASE_URL: "file:./test.db"
@@ -36,4 +36,4 @@ jobs:
           echo "Ref: $GITHUB_REF"
 
       - run: npm run build
-      - run: npm publish --provenance --access public
+      - run: npm publish
