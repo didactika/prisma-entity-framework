@@ -1,7 +1,7 @@
 
 ### Configuration
 
-#### `configurePrisma(prisma: PrismaClient): void`
+#### `configurePrisma(prisma: PrismaClient, config?: PrismaConfig): void`
 Configure the Prisma client instance. **Call once at startup.**
 
 ```typescript
@@ -10,7 +10,33 @@ import { configurePrisma } from 'prisma-entity-framework';
 
 const prisma = new PrismaClient();
 configurePrisma(prisma);
+
+// with options
+configurePrisma(prisma, {
+    caseInsensitiveSearch: false,  // default: true
+    maxConcurrency: 8,
+    enableParallel: true,
+    maxQueriesPerSecond: 100
+});
 ```
+
+**`config.caseInsensitiveSearch`** — whether `like`, `startsWith` and `endsWith` ignore letter case.
+Defaults to `true`, which keeps text search consistent across providers rather than exposing each
+database's collation rules. Any single condition can override it with its own `insensitive` field.
+
+How far the guarantee reaches, since only PostgreSQL and MongoDB accept an explicit case mode:
+
+| | PostgreSQL / MongoDB | SQLite | MySQL |
+| --- | --- | --- | --- |
+| `like` / `startsWith` / `endsWith`, insensitive | ✅ explicit mode | ✅ already insensitive | ✅ with a `_ci` collation |
+| the same, `insensitive: false` | ✅ enforced | ❌ `LIKE` stays insensitive | ⚠️ collation decides |
+| `equals` with `insensitive: true` | ✅ | ❌ `=` stays case-sensitive | ⚠️ collation decides |
+
+The default — case-insensitive text search — holds everywhere. Overriding it in either direction is
+only reliable on PostgreSQL and MongoDB.
+
+#### `isCaseInsensitiveSearch(): boolean`
+The configured value, defaulting to `true`.
 
 #### `getPrismaInstance(): PrismaClient`
 Get the configured Prisma instance.
@@ -111,8 +137,8 @@ await User.countByFilter(filter, { tx });
 Advanced query with filters, search, pagination, and relations.
 
 **Parameters:**
-- `filter` - Base Prisma where clause
-- `options.search` - Search configuration (string, range, list)
+- `filter` - Plain equality filter, ANDed with the search
+- `options.search` - Search tree: conditions combined with `and` / `or` / `not`
 - `options.pagination` - Pagination settings
 - `options.relationsToInclude` - Relations to include
 - `options.orderBy` - Sort configuration
@@ -124,9 +150,7 @@ Advanced query with filters, search, pagination, and relations.
 const users = await User.findByFilter(
     { isActive: true },
     {
-        search: {
-            stringSearch: [{ keys: ['name'], value: 'john', mode: 'LIKE' }]
-        },
+        search: { field: 'name', like: 'john' },
         pagination: { page: 1, pageSize: 10, take: 10, skip: 0 },
         orderBy: { createdAt: 'desc' }
     }
@@ -300,19 +324,43 @@ Convert relation objects to foreign key fields.
 
 ---
 
-### SearchUtils & SearchBuilder
+### SearchResolver, SearchUtils & helpers
 
-Build complex search queries declaratively.
+A search is a boolean expression built from conditions and the `and` / `or` / `not` nodes that
+combine them, to any depth.
 
 ```typescript
-import { SearchBuilder, SearchUtils, FindByFilterOptions, ModelUtils } from 'prisma-entity-framework';
+import { SearchResolver, SearchUtils, anyOf, allOf, Search, ModelUtils } from 'prisma-entity-framework';
 
 const modelInfo = ModelUtils.getModelInformationCached('User');
-const searchOptions: FindByFilterOptions.SearchOptions = {
-    stringSearch: [{ keys: ['name'], value: 'john', mode: 'LIKE' }]
-};
-const filters = SearchBuilder.build({}, searchOptions, modelInfo);
+
+// Resolve a tree into a Prisma `where` fragment
+const where = SearchResolver.resolve({ field: 'name', like: 'john' }, modelInfo);
+// { name: { contains: 'john' } }
+
+// Combine a base filter with a search tree
+const filters = SearchUtils.applySearchFilter(
+    { isActive: { equals: true } },
+    anyOf(['name', 'email'], { like: 'john' }),
+    modelInfo
+);
+// { isActive: { equals: true }, OR: [ { name: {...} }, { email: {...} } ] }
+
+// Turn form data into conditions
+const conditions = SearchUtils.conditionsFrom({ name: 'John', email: '' }, 'like');
+// [ { field: 'name', like: 'John' } ]
 ```
+
+| Export | Purpose |
+| --- | --- |
+| `SearchResolver.resolve(tree, modelInfo?)` | Tree → Prisma `where` fragment, or `null` when nothing survives pruning |
+| `SearchResolver.merge(base, tree, modelInfo?)` | Same, merged onto an already-resolved base filter |
+| `SearchResolver.chunkLargeLists(tree, size)` | Split an oversized `in`/`notIn` into one tree per chunk |
+| `anyOf(fields, condition)` | One condition per field, combined with OR |
+| `allOf(fields, condition)` | One condition per field, combined with AND |
+| `SearchUtils.conditionsFrom(obj, operator?)` | One condition per non-empty string field |
+
+See [Advanced Examples](./advanced-examples.md)
 
 ---
 

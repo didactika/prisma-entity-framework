@@ -276,8 +276,8 @@ describe('DateTime Fields with Explicit Date Input - Integration Tests', () => {
     });
   });
 
-  describe('findByFilter() rangeSearch DateTime null handling', () => {
-    it('should include null DateTime values when includeNull is true', async () => {
+  describe('findByFilter() range DateTime null handling', () => {
+    it('should include null DateTime values when orNull is true', async () => {
       const now = new Date();
       const pastDate = new Date(now.getTime() - 60_000);
 
@@ -289,15 +289,7 @@ describe('DateTime Fields with Explicit Date Input - Integration Tests', () => {
       const jobs = await Job.findByFilter(
         { type: 'RANGE_INCLUDE_NULL' },
         {
-          search: {
-            rangeSearch: [
-              {
-                keys: ['scheduledFor'],
-                max: now,
-                includeNull: true
-              }
-            ]
-          }
+          search: { field: 'scheduledFor', lte: now, orNull: true }
         }
       ) as any[];
 
@@ -309,7 +301,7 @@ describe('DateTime Fields with Explicit Date Input - Integration Tests', () => {
       expect(hasPastDate).toBe(true);
     });
 
-    it('should exclude null DateTime values when includeNull is not set', async () => {
+    it('should exclude null DateTime values when orNull is not set', async () => {
       const now = new Date();
       const pastDate = new Date(now.getTime() - 60_000);
 
@@ -321,14 +313,7 @@ describe('DateTime Fields with Explicit Date Input - Integration Tests', () => {
       const jobs = await Job.findByFilter(
         { type: 'RANGE_EXCLUDE_NULL' },
         {
-          search: {
-            rangeSearch: [
-              {
-                keys: ['scheduledFor'],
-                max: now
-              }
-            ]
-          }
+          search: { field: 'scheduledFor', lte: now }
         }
       ) as any[];
 
@@ -337,7 +322,7 @@ describe('DateTime Fields with Explicit Date Input - Integration Tests', () => {
       expect(jobs[0].scheduledFor.getTime()).toBe(pastDate.getTime());
     });
 
-    it('should not throw for rangeSearch on required DateTime field without includeNull', async () => {
+    it('should not throw for a range on a required DateTime field without orNull', async () => {
       const futureDate = new Date('2100-01-01T00:00:00.000Z');
 
       await Job.createMany([
@@ -348,21 +333,10 @@ describe('DateTime Fields with Explicit Date Input - Integration Tests', () => {
       const jobs = await Job.findByFilter(
         {},
         {
-          search: {
-            listSearch: [
-              {
-                keys: ['type'],
-                values: ['RANGE_REQUIRED_DATETIME_1', 'RANGE_REQUIRED_DATETIME_2'],
-                mode: 'IN'
-              }
-            ],
-            rangeSearch: [
-              {
-                keys: ['createdAt'],
-                max: futureDate
-              }
-            ]
-          }
+          search: [
+            { field: 'type', in: ['RANGE_REQUIRED_DATETIME_1', 'RANGE_REQUIRED_DATETIME_2'] },
+            { field: 'createdAt', lte: futureDate }
+          ]
         }
       ) as any[];
 

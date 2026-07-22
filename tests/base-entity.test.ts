@@ -302,47 +302,45 @@ describe('BaseEntity', () => {
     });
 
     /**
-     * Test: should support array filter with OR grouping
+     * Test: alternatives are expressed with an or node, replacing the old array filter
      */
-    it('should support array filter with OR grouping', async () => {
+    it('should support alternatives through an or node', async () => {
       const findManySpy = jest.spyOn(mockPrismaClient.user, 'findMany');
-      
-      await User.findByFilter(
-        [
-          { name: 'John' },
-          { name: 'Jane' }
-        ],
-        { filterGrouping: 'or' }
-      );
-      
+
+      await User.findByFilter({}, {
+        search: {
+          or: [
+            { field: 'name', equals: 'John' },
+            { field: 'name', equals: 'Jane' }
+          ]
+        }
+      });
+
       expect(findManySpy).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            AND: [{
-              OR: [
-                { name: { equals: 'John' } },
-                { name: { equals: 'Jane' } }
-              ]
-            }]
+            OR: [
+              { name: { equals: 'John' } },
+              { name: { equals: 'Jane' } }
+            ]
           }
         })
       );
     });
 
     /**
-     * Test: should support array filter with AND grouping
+     * Test: several requirements combine with AND through a root array
      */
-    it('should support array filter with AND grouping', async () => {
+    it('should combine several conditions with a root array', async () => {
       const findManySpy = jest.spyOn(mockPrismaClient.user, 'findMany');
-      
-      await User.findByFilter(
-        [
-          { isActive: true },
-          { age: 30 }
-        ],
-        { filterGrouping: 'and' }
-      );
-      
+
+      await User.findByFilter({}, {
+        search: [
+          { field: 'isActive', equals: true },
+          { field: 'age', equals: 30 }
+        ]
+      });
+
       expect(findManySpy).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
@@ -356,20 +354,28 @@ describe('BaseEntity', () => {
     });
 
     /**
-     * Test: should default to AND for array filter without filterGrouping
+     * Test: the base filter still ANDs with the search tree
      */
-    it('should default to AND for array filter without filterGrouping', async () => {
+    it('should combine the base filter with the search tree', async () => {
       const findManySpy = jest.spyOn(mockPrismaClient.user, 'findMany');
-      
-      await User.findByFilter([
-        { isActive: true },
-        { name: 'John' }
-      ]);
-      
+
+      await User.findByFilter({ isActive: true }, {
+        search: {
+          or: [
+            { field: 'name', like: 'John' },
+            { field: 'email', like: 'John' }
+          ]
+        }
+      });
+
       expect(findManySpy).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            AND: expect.any(Array)
+            isActive: { equals: true },
+            OR: [
+              { name: { contains: 'John' } },
+              { email: { contains: 'John' } }
+            ]
           }
         })
       );
