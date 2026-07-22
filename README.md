@@ -20,7 +20,8 @@ Prisma is a fantastic query builder, but it's not a traditional ORM. This framew
 |---------|--------------|-------------------------|
 | **Active Record** | ❌ No | ✅ `user.create()`, `user.update()` |
 | **Instance Methods** | ❌ No | ✅ Full lifecycle methods |
-| **Query DSL** | Basic where | ✅ LIKE, ranges, lists, OR/AND |
+| **Query DSL** | Basic where | ✅ Composable AND/OR/NOT tree, LIKE, ranges, lists |
+| **Case-insensitive search** | Provider-dependent | ✅ Consistent on every provider |
 | **Batch Optimization** | Basic | ✅ Database-specific, SQL-optimized |
 | **Upsert** | Manual | ✅ Automatic with change detection |
 | **Graph Traversal** | Manual | ✅ Automatic path finding |
@@ -74,6 +75,8 @@ pnpm add prisma-entity-framework
 
 3.  **Use It!**
     ```typescript
+    import { anyOf } from 'prisma-entity-framework';
+
     // Create a new user with the Active Record pattern
     const user = new User({ name: "John Doe", email: "john.doe@example.com" });
     await user.create();
@@ -83,9 +86,7 @@ pnpm add prisma-entity-framework
         isActive: true
     }, {
         onlyOne: true, //get only first match or all records, false by default
-        search: {
-            stringSearch: [{ keys: ['name', 'email'], value: 'john', mode: 'LIKE' }]
-        },
+        search: anyOf(['name', 'email'], { like: 'john' }),
         pagination: { page: 1, pageSize: 10, take: 10, skip: 0 }
     });
 
@@ -101,24 +102,32 @@ pnpm add prisma-entity-framework
     const user = new User({ name: "John" });
     await user.create();
     ```
--   🔍 **Advanced Query Builder**: Build complex, declarative queries with support for `LIKE`, ranges, lists, and OR/AND/NOT filter grouping.
+-   🔍 **Declarative Query Tree**: Compose `and`, `or` and `not` around plain conditions to any depth. Searches are plain data, so they can be typed, stored in a variable, or sent as JSON from a client.
     ```typescript
-    // Simple range search
-    const users = await User.findByFilter({name: "John"}, {
-        search: { rangeSearch: [{ keys: ['age'], min: 18 }] }
+    // Simple range
+    const users = await User.findByFilter({ name: "John" }, {
+        search: { field: 'age', gte: 18 }
     });
 
-    // OR filter grouping with includeNull for nullable DateTime fields
-    const users = await User.findByFilter(
-        [{ isActive: true }, { isVerified: true }],
-        {
-            filterGrouping: 'or',
-            search: {
-                rangeSearch: [{ keys: ['createdAt'], max: new Date(), includeNull: true }]
-            },
-            orderBy: [{ createdAt: 'asc' }, { name: 'asc' }]
-        }
-    );
+    // (name LIKE john OR email LIKE john) AND (createdAt <= now OR createdAt IS NULL)
+    const users = await User.findByFilter({ isActive: true }, {
+        search: {
+            and: [
+                anyOf(['name', 'email'], { like: 'john' }),
+                { field: 'createdAt', lte: new Date(), orNull: true }
+            ]
+        },
+        orderBy: [{ createdAt: 'asc' }, { name: 'asc' }]
+    });
+    ```
+-   🔤 **Case-insensitive text search everywhere**: `like`, `startsWith` and `endsWith` ignore letter case on every provider by default, instead of leaking each database's own collation rules into your results.
+    ```typescript
+    // matches "John", "JOHN" and "john" on PostgreSQL, MySQL, SQLite and MongoDB alike
+    await User.findByFilter({}, { search: { field: 'name', like: 'john' } });
+
+    // opt out globally, or per condition
+    configurePrisma(prisma, { caseInsensitiveSearch: false });
+    await User.findByFilter({}, { search: { field: 'code', like: 'X9', insensitive: false } });
     ```
 -   ⚡ **Optimized Batch Operations**: High-performance, database-aware batching for `createMany`, `updateMany`, and `upsertMany`.
     ```typescript

@@ -68,6 +68,25 @@ export interface PrismaConfig {
      * Optional global hooks for upsertMany execution.
      */
     upsertManyHooks?: UpsertManyHooks;
+
+    /**
+     * Whether text search operators ignore letter case.
+     * Default: `true`
+     *
+     * @remarks
+     * Applies to `like`, `startsWith` and `endsWith`. Databases disagree out of the box —
+     * PostgreSQL and MongoDB are case-sensitive, SQLite is not, and MySQL depends on the column
+     * collation — so the framework normalises the behaviour instead of leaking that difference
+     * into your queries.
+     *
+     * On PostgreSQL and MongoDB this emits Prisma's `mode: 'insensitive'`. On SQLite and MySQL
+     * nothing is emitted, because those providers reject the flag and are already
+     * case-insensitive by default.
+     *
+     * Set to `false` to get the raw, provider-dependent behaviour. Any single condition can
+     * override this with its own `insensitive` field.
+     */
+    caseInsensitiveSearch?: boolean;
 }
 
 /**
@@ -84,6 +103,7 @@ let globalConfig: PrismaConfig = {
     maxQueriesPerSecond: 100,
     upsertManyUseRawQuery: true,
     upsertManyHooks: undefined,
+    caseInsensitiveSearch: true,
 };
 
 /**
@@ -149,12 +169,31 @@ export function configurePrisma(prisma: PrismaClient, config?: PrismaConfig): vo
     }
     
     globalPrismaInstance = prisma;
-    
+
+    // A new client may point at a different database, so the detected provider must be re-read
+    clearProviderCache();
+
     // Initialize rate limiter with configured rate
     globalRateLimiter = createRateLimiter({
         maxQueriesPerSecond: globalConfig.maxQueriesPerSecond || 100,
         algorithm: 'token-bucket'
     });
+}
+
+/**
+ * Drops the memoised database provider
+ *
+ * @remarks
+ * Loaded lazily because database-utils reads the Prisma instance from this module, and a
+ * top-level import would close the cycle.
+ */
+function clearProviderCache(): void {
+    try {
+        const { clearDatabaseProviderCache } = require('./utils/database-utils');
+        clearDatabaseProviderCache();
+    } catch {
+        // The cache only exists once database-utils has been loaded; nothing to drop otherwise.
+    }
 }
 
 /**
@@ -195,7 +234,29 @@ export function resetPrismaConfiguration(): void {
         maxQueriesPerSecond: 100,
         upsertManyUseRawQuery: true,
         upsertManyHooks: undefined,
+        caseInsensitiveSearch: true,
     };
+
+    clearProviderCache();
+}
+
+/**
+ * Whether text search operators should ignore letter case
+ *
+ * @returns The configured value, defaulting to `true`
+ *
+ * @remarks
+ * Read by {@link SearchResolver} for `like`, `startsWith` and `endsWith`. A condition's own
+ * `insensitive` field takes precedence over this.
+ *
+ * @example
+ * ```typescript
+ * configurePrisma(prisma, { caseInsensitiveSearch: false });
+ * isCaseInsensitiveSearch(); // false
+ * ```
+ */
+export function isCaseInsensitiveSearch(): boolean {
+    return globalConfig.caseInsensitiveSearch !== false;
 }
 
 

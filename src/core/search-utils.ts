@@ -1,44 +1,42 @@
-import SearchBuilder from "./search-builder";
-import {FindByFilterOptions} from "./structures/types/search.types";
+import { Search } from "./structures/types/search.types";
+import SearchResolver from "./search-resolver";
 import ConditionUtils from "./condition-utils";
 import ObjectUtils from "./object-utils";
 import { getPrismaInstance } from "./config";
 
 /**
  * SearchUtils class for high-level search filter operations
- * Provides utilities for applying search filters and default filters to queries
- * 
+ * Provides utilities for applying search trees and default filters to queries
+ *
  * @class SearchUtils
  */
 export default  class SearchUtils {
     /**
-     * Applies search filters to a base filter using SearchBuilder
-     * 
+     * Combines a base filter with a search tree
+     *
      * @param baseFilter - The base filter object to extend
-     * @param searchOptions - Search options with string, range, and list searches
+     * @param search - Search tree (see {@link Search.Input})
      * @param modelInfo - Optional Prisma model information for relation detection
-     * @returns Combined filter with search conditions applied
-     * 
+     * @returns Combined filter with the search conditions applied
+     *
      * @remarks
-     * This is a wrapper around SearchBuilder.build() for convenience
-     * Combines the base filter with advanced search options
-     * 
+     * Thin wrapper around {@link SearchResolver.merge}.
+     *
      * @example
      * ```typescript
      * const filter = SearchUtils.applySearchFilter(
      *   { isActive: true },
-     *   {
-     *     stringSearch: [{ keys: ['name'], value: 'John', mode: 'LIKE' }]
-     *   }
+     *   { field: 'name', like: 'John' }
      * );
+     * // { isActive: true, name: { contains: 'John' } }
      * ```
      */
     public static applySearchFilter(
         baseFilter: Record<string, any>,
-        searchOptions: FindByFilterOptions.SearchOptions,
+        search: Search.Input,
         modelInfo?: any
     ): Record<string, any> {
-        return SearchBuilder.build(baseFilter, searchOptions, modelInfo);
+        return SearchResolver.merge(baseFilter, search, modelInfo);
     }
 
     /**
@@ -187,38 +185,34 @@ export default  class SearchUtils {
 
 
     /**
-     * Generates string search options for all string fields in a filter object
-     * 
-     * @param filters - Object with field values to create search options from
-     * @param mode - Search mode to apply (default: 'EXACT')
-     * @param grouping - Whether to use 'and' or 'or' grouping (default: 'and')
-     * @returns Array of string search options for all non-empty string fields
-     * 
+     * Builds one search condition per non-empty string field of a plain object
+     *
+     * @param filters - Object with field values to turn into conditions
+     * @param operator - Which string operator to apply (default: `'equals'`)
+     * @returns One condition per usable field, ready to drop into an `or`/`and` node
+     *
      * @remarks
-     * - Only processes string fields with non-empty values
-     * - Useful for quickly creating search options from form data
-     * - Each field gets its own search option
-     * 
+     * Convenience for turning form data or query params into a search tree. Fields that are not
+     * non-empty strings are skipped. The result is a plain array, so it can be used directly as
+     * the root of a search (which means AND) or wrapped in `{ or: [...] }`.
+     *
      * @example
      * ```typescript
-     * SearchUtils.getCustomSearchOptionsForAll(
+     * const conditions = SearchUtils.conditionsFrom(
      *   { name: 'John', email: 'john@example.com' },
-     *   'LIKE',
-     *   'or'
+     *   'like'
      * );
-     * // Returns: [
-     * //   { keys: ['name'], value: 'John', mode: 'LIKE', grouping: 'or' },
-     * //   { keys: ['email'], value: 'john@example.com', mode: 'LIKE', grouping: 'or' }
-     * // ]
+     * // [ { field: 'name', like: 'John' }, { field: 'email', like: 'john@example.com' } ]
+     *
+     * await User.findByFilter({}, { search: { or: conditions } });
      * ```
      */
-    public static getCustomSearchOptionsForAll(
+    public static conditionsFrom(
         filters: Record<string, any>,
-        mode: "LIKE" | "EXACT" | "STARTS_WITH" | "ENDS_WITH" = "EXACT",
-        grouping: "and" | "or" = "and"
-    ): FindByFilterOptions.StringSearch[] {
+        operator: "equals" | "like" | "startsWith" | "endsWith" = "equals"
+    ): Search.Condition[] {
         return Object.entries(filters)
-            .filter(([_, v]) => typeof v === "string" && v.trim() !== "")
-            .map(([k, v]) => ({ keys: [k], value: v as string, mode, grouping }));
+            .filter(([, value]) => typeof value === "string" && value.trim() !== "")
+            .map(([field, value]) => ({ field, [operator]: value }) as Search.Condition);
     }
 }

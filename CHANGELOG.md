@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-07-22
+
+### Changed — BREAKING
+
+- **The search contract is now a boolean tree.** `options.search` accepts conditions combined with
+  `{ and: [...] }`, `{ or: [...] }` and `{ not: ... }` to any depth; an array at the root means AND.
+  **There is no adapter and no automatic translation** — the previous contract was removed outright.
+
+  ```typescript
+  // before
+  search: {
+      stringSearch: [{ keys: ['name', 'email'], value: 'john', mode: 'LIKE', grouping: 'or' }],
+      rangeSearch: [{ keys: ['age'], min: 18 }]
+  }
+
+  // after
+  search: [
+      anyOf(['name', 'email'], { like: 'john' }),
+      { field: 'age', gte: 18 }
+  ]
+  ```
+
+  What this buys, none of which was expressible before: arbitrary nesting such as
+  `(A AND B) OR C`, negation via `not`, and relation quantifiers `every` / `none`.
+
+- **Removed:** `stringSearch`, `rangeSearch`, `listSearch`, the per-entry `grouping`, the `group`
+  label, the top-level `search.grouping`, `filterGrouping`, the array form of the `filter`
+  argument, `SearchBuilder`, `ConditionUtils.string/range/list`, and
+  `SearchUtils.getCustomSearchOptionsForAll`.
+
+- **Migration table:**
+
+  | Before | After |
+  | --- | --- |
+  | `mode: 'LIKE' / 'EXACT' / 'STARTS_WITH' / 'ENDS_WITH'` | `like` / `equals` / `startsWith` / `endsWith` |
+  | `rangeSearch: [{ keys, min, max }]` | `{ field, between: [min, max] }` |
+  | `includeNull: true` | `orNull: true` |
+  | `listSearch` modes `IN`/`NOT_IN`/`HAS_SOME`/`HAS_EVERY` | `in` / `notIn` / `hasSome` / `hasEvery` |
+  | entry with `grouping: 'and'` | a condition inside the root array |
+  | entry with `grouping: 'or'` over several keys | `anyOf([...], { … })` |
+  | `group: 'x'` | its own `or` node |
+  | `filterGrouping: 'or'` + array filter | an `or` node |
+  | `SearchUtils.getCustomSearchOptionsForAll(obj, mode)` | `SearchUtils.conditionsFrom(obj, operator)` |
+
+- **`filter` is now a single `Partial<TModel>`.** The array form existed only to enable OR between
+  filters, which is the tree's job. `findByFilter([{a}, {b}], { filterGrouping: 'or' })` becomes
+  `findByFilter({}, { search: { or: [...] } })`.
+
+### Added
+
+- **`SearchResolver`**: resolves a tree into a Prisma `where` fragment (`resolve`), merges it onto a
+  base filter (`merge`), and splits oversized `in`/`notIn` lists into per-chunk trees
+  (`chunkLargeLists`).
+- **`anyOf(fields, condition)` / `allOf(fields, condition)`**: apply one condition to several fields.
+  They return plain nodes, so the output stays JSON-serializable and the resolver knows nothing
+  about them.
+- **`SearchUtils.conditionsFrom(obj, operator?)`**: turns form data or query params into conditions.
+- **Relation quantifiers**: `relation: 'some' | 'every' | 'none'` on any condition whose path crosses
+  a to-many relation. Previously only `some` was reachable.
+- **Negation**: `{ not: <node> }` maps to Prisma's `NOT`.
+- **Consistent case-insensitive text search**: `like`, `startsWith` and `endsWith` ignore letter case
+  on every provider by default. Databases disagree out of the box — PostgreSQL and MongoDB are
+  case-sensitive, SQLite is not, MySQL depends on the column collation — so the resolver emits
+  Prisma's `mode: 'insensitive'` where it is supported and omits it where the provider is already
+  insensitive and would reject the flag. Configurable globally with
+  `configurePrisma(prisma, { caseInsensitiveSearch: false })` and per condition with `insensitive`.
+  `equals` stays case-sensitive unless a condition sets `insensitive: true`.
+- **`Search` types are exported** from the package entry point, so a search can be typed, held in a
+  variable, built in another module, or received as JSON: `Search.Input`, `Search.Node`,
+  `Search.Condition`, `Search.Operator`, `Search.RelationQuantifier`, `Search.Comparable`.
+- **The operator union is exclusive**: two operators in one condition is now a compile error.
+  A plain union let TypeScript accept `{ like: 'a', gte: 5 }`, because excess-property checking
+  allows any key present in some member; each member now marks the others as `?: never`.
+- **`tests/search-resolver.test.ts`**: 77 tests covering every resolution rule, every operator,
+  pruning, merging, chunking and the helpers.
+
+### Fixed
+
+- **`resetPrismaConfiguration()` left the detected database provider cached.** Reconfiguring with a
+  client pointing at a different database kept reporting the old provider. Both
+  `configurePrisma()` and `resetPrismaConfiguration()` now drop the cache. This mattered little
+  before and matters now: the resolver reads the provider to decide whether `mode: 'insensitive'`
+  can be emitted.
+- **Structural fixes that come free with the tree.** Two conditions on the same field are now two
+  separate nodes, so the silent overwrite of the old `ObjectUtils.assign` path is gone. Empty groups
+  are pruned before emission, so `OR: []` — which Prisma reads as *match nothing* — cannot be
+  produced. And a base filter carrying its own `OR` is no longer widened by the search: the search
+  fragment nests under `AND` instead.
+
 ## [2.1.0] - 2026-06-04
 
 ### Added

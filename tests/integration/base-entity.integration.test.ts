@@ -23,6 +23,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/glo
 import BaseEntity from '../../src/core/base-entity';
 import { Property } from '../../src/core/decorators/property.decorator';
 import { configurePrisma, resetPrismaConfiguration } from '../../src/core/config';
+import { anyOf } from '../../src/core/search-helpers';
 import { createTestDb } from '../helpers/test-db';
 import type { PrismaClient } from '@prisma/client';
 
@@ -489,9 +490,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
      */
     it('should apply string search with LIKE', async () => {
       const users = await User.findByFilter({}, {
-        search: {
-          stringSearch: [{ keys: ['name'], value: 'John', mode: 'LIKE' }],
-        },
+        search: { field: 'name', like: 'John' },
       }) as any[];
 
       expect(users.length).toBeGreaterThan(0);
@@ -503,9 +502,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
      */
     it('should apply range search', async () => {
       const users = await User.findByFilter({}, {
-        search: {
-          rangeSearch: [{ keys: ['age'], min: 25, max: 30 }],
-        },
+        search: { field: 'age', between: [25, 30] },
       }) as any[];
 
       expect(users.length).toBeGreaterThan(0);
@@ -750,16 +747,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
           }
         } as any,
         {
-          search: {
-            stringSearch: [
-              {
-                keys: ['posts.title'],
-                value: 'Post',
-                mode: 'LIKE',
-                grouping: 'and'
-              }
-            ]
-          },
+          search: { field: 'posts.title', like: 'Post' },
           relationsToInclude: [{ posts: [{ comments: [] }] }]
         }
       ) as any[];
@@ -800,15 +788,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
           }
         } as any,
         {
-          search: {
-            stringSearch: [
-              {
-                keys: ['posts.title'],
-                value: 'First',
-                mode: 'LIKE'
-              }
-            ]
-          }
+          search: { field: 'posts.title', like: 'First' }
         }
       ) as any[];
 
@@ -832,20 +812,10 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
           }
         } as any,
         {
-          search: {
-            stringSearch: [
-              {
-                keys: ['posts.title'],
-                value: 'Post',
-                mode: 'LIKE'
-              },
-              {
-                keys: ['posts.content'],
-                value: 'post',
-                mode: 'LIKE'
-              }
-            ]
-          }
+          search: [
+            { field: 'posts.title', like: 'Post' },
+            { field: 'posts.content', like: 'post' }
+          ]
         }
       ) as any[];
 
@@ -868,15 +838,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       const users = await User.findByFilter(
         {},
         {
-          search: {
-            stringSearch: [
-              {
-                keys: ['posts.author.name'],
-                value: 'John',
-                mode: 'LIKE'
-              }
-            ]
-          }
+          search: { field: 'posts.author.name', like: 'John' }
         }
       ) as any[];
 
@@ -893,15 +855,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       const users = await User.findByFilter(
         {},
         {
-          search: {
-            stringSearch: [
-              {
-                keys: ['posts.comments.author.name'],
-                value: 'John',
-                mode: 'LIKE'
-              }
-            ]
-          }
+          search: { field: 'posts.comments.author.name', like: 'John' }
         }
       ) as any[];
 
@@ -922,15 +876,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
           }
         } as any,
         {
-          search: {
-            stringSearch: [
-              {
-                keys: ['posts.author.name'],
-                value: 'John',
-                mode: 'LIKE'
-              }
-            ]
-          }
+          search: { field: 'posts.author.name', like: 'John' }
         }
       ) as any[];
 
@@ -945,15 +891,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       const users = await User.findByFilter(
         {},
         {
-          search: {
-            stringSearch: [
-              {
-                keys: ['posts.author.email'],
-                value: '@example.com',
-                mode: 'ENDS_WITH'
-              }
-            ]
-          }
+          search: { field: 'posts.author.email', endsWith: '@example.com' }
         }
       ) as any[];
 
@@ -974,16 +912,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       const users = await User.findByFilter(
         {},
         {
-          search: {
-            stringSearch: [
-              {
-                keys: ['posts.title', 'posts.author.name'],
-                value: 'Post',
-                mode: 'LIKE',
-                grouping: 'or'
-              }
-            ]
-          }
+          search: anyOf(['posts.title', 'posts.author.name'], { like: 'Post' })
         }
       ) as any[];
 
@@ -997,15 +926,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       const users = await User.findByFilter(
         {},
         {
-          search: {
-            rangeSearch: [
-              {
-                keys: ['posts.author.age'],
-                min: 25,
-                max: 35
-              }
-            ]
-          }
+          search: { field: 'posts.author.age', between: [25, 35] }
         }
       ) as any[];
 
@@ -1019,15 +940,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       const users = await User.findByFilter(
         {},
         {
-          search: {
-            stringSearch: [
-              {
-                keys: ['comments.author.name'],
-                value: 'John',
-                mode: 'LIKE'
-              }
-            ]
-          }
+          search: { field: 'comments.author.name', like: 'John' }
         }
       ) as any[];
 
@@ -1042,15 +955,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       const users = await User.findByFilter(
         {},
         {
-          search: {
-            stringSearch: [
-              {
-                keys: ['posts.comments.post.author.name'],
-                value: 'John',
-                mode: 'LIKE'
-              }
-            ]
-          }
+          search: { field: 'posts.comments.post.author.name', like: 'John' }
         }
       ) as any[];
 
@@ -1446,22 +1351,23 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     });
   });
 
-  describe('filterGrouping with array filters', () => {
+  describe('alternatives through or nodes', () => {
     beforeEach(async () => {
       await db.seed();
     });
 
     /**
-     * Test: should find users with OR filter grouping
+     * Test: should find users matching either alternative
      */
-    it('should find users with OR filter grouping', async () => {
-      const users = await User.findByFilter(
-        [
-          { name: 'John Doe' },
-          { name: 'Jane Smith' }
-        ],
-        { filterGrouping: 'or' }
-      ) as any[];
+    it('should find users matching either alternative', async () => {
+      const users = await User.findByFilter({}, {
+        search: {
+          or: [
+            { field: 'name', equals: 'John Doe' },
+            { field: 'name', equals: 'Jane Smith' }
+          ]
+        }
+      }) as any[];
 
       expect(users.length).toBe(2);
       const names = users.map((u: any) => u.name);
@@ -1470,16 +1376,15 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     });
 
     /**
-     * Test: should find users with AND filter grouping
+     * Test: should require every condition of a root array
      */
-    it('should find users with AND filter grouping', async () => {
-      const users = await User.findByFilter(
-        [
-          { isActive: true },
-          { name: 'John Doe' }
-        ],
-        { filterGrouping: 'and' }
-      ) as any[];
+    it('should require every condition of a root array', async () => {
+      const users = await User.findByFilter({}, {
+        search: [
+          { field: 'isActive', equals: true },
+          { field: 'name', equals: 'John Doe' }
+        ]
+      }) as any[];
 
       expect(users.length).toBe(1);
       expect(users[0].name).toBe('John Doe');
@@ -1487,15 +1392,15 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     });
 
     /**
-     * Test: should default to AND when filterGrouping not specified
+     * Test: a root array is AND, so contradictory conditions match nothing
      */
-    it('should default to AND when filterGrouping not specified', async () => {
-      const users = await User.findByFilter(
-        [
-          { isActive: true },
-          { name: 'Bob Johnson' }
+    it('should return nothing when the root array conditions cannot both hold', async () => {
+      const users = await User.findByFilter({}, {
+        search: [
+          { field: 'isActive', equals: true },
+          { field: 'name', equals: 'Bob Johnson' }
         ]
-      ) as any[];
+      }) as any[];
 
       // Bob Johnson is NOT active, so AND should return 0 results
       expect(users.length).toBe(0);
@@ -1512,7 +1417,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     });
   });
 
-  describe('rangeSearch includeNull', () => {
+  describe('range with orNull', () => {
     beforeEach(async () => {
       await db.clear();
       // Create jobs with various scheduledFor values
@@ -1527,9 +1432,9 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     });
 
     /**
-     * Test: should include null values with includeNull option
+     * Test: should include null values with the orNull modifier
      */
-    it('should include null values with includeNull option', async () => {
+    it('should include null values with the orNull modifier', async () => {
       // Create a simple Job entity class for this test
       interface IJob {
         id?: number | string;
@@ -1555,13 +1460,7 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       const jobs = await Job.findByFilter(
         { status: 'PENDING' },
         {
-          search: {
-            rangeSearch: [{
-              keys: ['scheduledFor'],
-              max: new Date('2026-02-18'),
-              includeNull: true
-            }]
-          }
+          search: { field: 'scheduledFor', lte: new Date('2026-02-18'), orNull: true }
         }
       ) as any[];
 
@@ -1578,9 +1477,9 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     });
 
     /**
-     * Test: should NOT include null values without includeNull option
+     * Test: should NOT include null values without the orNull modifier
      */
-    it('should NOT include null values without includeNull option', async () => {
+    it('should NOT include null values without the orNull modifier', async () => {
       interface IJob {
         id?: number | string;
         type: string;
@@ -1605,13 +1504,8 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
       const jobs = await Job.findByFilter(
         { status: 'PENDING' },
         {
-          search: {
-            rangeSearch: [{
-              keys: ['scheduledFor'],
-              max: new Date('2026-02-18')
-              // No includeNull
-            }]
-          }
+          // No orNull
+          search: { field: 'scheduledFor', lte: new Date('2026-02-18') }
         }
       ) as any[];
 

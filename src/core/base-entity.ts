@@ -115,16 +115,18 @@ export default abstract class BaseEntity<
      *   }
      * );
      * 
-     * // Array filter with OR grouping
-     * const result = await User.findByFilter(
-     *   [{ status: 'PENDING' }, { status: 'FAILED' }],
-     *   { filterGrouping: 'or' }
-     * );
+     * // Search tree: (name LIKE john OR email LIKE john) AND price >= 100
+     * const result = await User.findByFilter({}, {
+     *   search: { and: [
+     *     { or: [{ field: 'name', like: 'john' }, { field: 'email', like: 'john' }] },
+     *     { field: 'price', gte: 100 }
+     *   ] }
+     * });
      * ```
      */
     public static async findByFilter<TModel extends object>(
         this: BaseEntityCtor<TModel>,
-        filter: FindByFilterOptions.FilterInput<TModel>,
+        filter: Partial<TModel>,
         options: FindByFilterOptions.Options = FindByFilterOptions.defaultOptions
     ): Promise<FindByFilterOptions.PaginatedResponse<TModel> | TModel[] | TModel | null> {
         const entityModel = resolveModel(this.model, options.tx);
@@ -159,7 +161,7 @@ export default abstract class BaseEntity<
     }
 
     public async findByFilter(
-        filter: FindByFilterOptions.FilterInput<TModel>,
+        filter: Partial<TModel>,
         options: FindByFilterOptions.Options = FindByFilterOptions.defaultOptions
     ): Promise<
         | FindByFilterOptions.PaginatedResponse<TModel>

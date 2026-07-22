@@ -1,6 +1,7 @@
 import { FindByFilterOptions } from "./structures/types/search.types";
 import ModelUtils from "./model-utils";
 import SearchUtils from "./search-utils";
+import SearchResolver from "./search-resolver";
 import { isNonEmptyArray } from "./utils/validation-utils";
 import { logError } from "./utils/error-utils";
 import { executeWithOrBatching, deduplicateResults } from "./query-utils";
@@ -23,24 +24,23 @@ const CHUNK_SIZE = 10000;
  * - Advanced filtering with search criteria
  * - Pagination support
  * - Nested relation includes
- * - Automatic chunking for large list searches (>10k items)
+ * - Automatic chunking for large list conditions (>10k items)
  * - Parallel execution for improved performance
  * - Optimized OR batching for large condition sets
- * - Array filter support with filterGrouping (OR/AND)
  */
 export default class BaseEntityQuery {
     /**
      * Finds entities by applying filters, search criteria, pagination, and ordering.
      * 
-     * Supports relation includes, complex searches, and automatic chunking for large list searches (>10k items).
-     * Automatically optimizes queries with large OR conditions using batching.
-     * 
-     * @param filter - Single filter object or array of filters (combined with options.filterGrouping)
+     * Supports relation includes, boolean search trees, and automatic chunking for large list
+     * conditions (>10k values). Automatically optimizes queries with large OR conditions using batching.
+     *
+     * @param filter - Plain equality filter, ANDed with the search tree
      */
     public static async findByFilter<TModel extends object>(
         entityModel: EntityPrismaModel<TModel>,
         getModelInformation: () => ModelInfo,
-        filter: FindByFilterOptions.FilterInput<TModel>,
+        filter: Partial<TModel>,
         options: FindByFilterOptions.Options = FindByFilterOptions.defaultOptions
     ): Promise<
         | FindByFilterOptions.PaginatedResponse<TModel>
@@ -72,35 +72,18 @@ export default class BaseEntityQuery {
             }
         }
 
-        // Handle array of filters with filterGrouping
-        let whereClauseBase: Record<string, unknown>;
-        
-        if (Array.isArray(filter)) {
-            const filterGrouping = options.filterGrouping ?? 'and';
-            const processedFilters = filter.map(f => 
-                SearchUtils.applyDefaultFilters(f as Record<string, unknown>, modelInfo)
-            );
-            
-            // Wrap in AND to prevent OR batching optimization from interfering
-            // This ensures user-provided array filters work with complex conditions
-            if (filterGrouping === 'or') {
-                whereClauseBase = { AND: [{ OR: processedFilters }] };
-            } else {
-                whereClauseBase = { AND: processedFilters };
-            }
-        } else {
-            whereClauseBase = SearchUtils.applyDefaultFilters(
-                filter as Record<string, unknown>,
-                modelInfo
-            ) as Record<string, unknown>;
-        }
+        const whereClauseBase = SearchUtils.applyDefaultFilters(
+            filter as Record<string, unknown>,
+            modelInfo
+        ) as Record<string, unknown>;
 
-        const listSearch = options.search?.listSearch || [];
-        const longIndex = listSearch.findIndex(
-            ls => Array.isArray(ls.values) && ls.values.length > CHUNK_SIZE
-        );
+        // A condition carrying more values than the database can take in a single IN list is
+        // split into one query per chunk, and the results merged.
+        const chunkedSearches = options.search
+            ? SearchResolver.chunkLargeLists(options.search, CHUNK_SIZE)
+            : null;
 
-        if (longIndex === -1) {
+        if (chunkedSearches === null) {
             let whereClause: Record<string, unknown> = whereClauseBase;
             if (options.search) {
                 whereClause = SearchUtils.applySearchFilter(
@@ -177,31 +160,27 @@ export default class BaseEntityQuery {
 
             return data;
         } else {
-            const longValues = listSearch[longIndex].values;
-            const chunks: unknown[][] = [];
-            for (let i = 0; i < longValues.length; i += CHUNK_SIZE) {
-                chunks.push(longValues.slice(i, i + CHUNK_SIZE));
-            }
+            const chunkWhereClauses = chunkedSearches.map(
+                chunkSearch =>
+                    SearchUtils.applySearchFilter(
+                        whereClauseBase,
+                        chunkSearch,
+                        modelInfo
+                    ) as Record<string, unknown>
+            );
 
             const useParallel =
-                options.parallel !== false && isParallelEnabled() && chunks.length > 1 && !shouldDisableParallel();
+                options.parallel !== false &&
+                isParallelEnabled() &&
+                chunkWhereClauses.length > 1 &&
+                !shouldDisableParallel();
 
             let allResults: TModel[][];
 
             if (useParallel) {
-                const operations = chunks.map(chunkValues => () => {
-                    const searchClone = options.search
-                        ? JSON.parse(JSON.stringify(options.search))
-                        : undefined;
-                    if (searchClone?.listSearch?.[longIndex]) {
-                        searchClone.listSearch[longIndex].values = chunkValues;
-                    }
-                    const whereClause = (searchClone
-                        ? SearchUtils.applySearchFilter(whereClauseBase, searchClone, modelInfo)
-                        : whereClauseBase) as Record<string, unknown>;
-
-                    return entityModel.findMany({ where: whereClause, include });
-                });
+                const operations = chunkWhereClauses.map(
+                    whereClause => () => entityModel.findMany({ where: whereClause, include })
+                );
 
                 const result = await executeInParallel(operations, {
                     concurrency: options.concurrency,
@@ -218,19 +197,9 @@ export default class BaseEntityQuery {
                     );
                 }
             } else {
-                const queryPromises = chunks.map(chunkValues => {
-                    const searchClone = options.search
-                        ? JSON.parse(JSON.stringify(options.search))
-                        : undefined;
-                    if (searchClone?.listSearch?.[longIndex]) {
-                        searchClone.listSearch[longIndex].values = chunkValues;
-                    }
-                    const whereClause = (searchClone
-                        ? SearchUtils.applySearchFilter(whereClauseBase, searchClone, modelInfo)
-                        : whereClauseBase) as Record<string, unknown>;
-
-                    return entityModel.findMany({ where: whereClause, include });
-                });
+                const queryPromises = chunkWhereClauses.map(
+                    whereClause => entityModel.findMany({ where: whereClause, include })
+                );
 
                 allResults = (await Promise.all(queryPromises)) as TModel[][];
             }

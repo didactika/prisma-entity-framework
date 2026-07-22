@@ -22,15 +22,14 @@ describe('SearchUtils', () => {
   });
   describe('applySearchFilter', () => {
     /**
-     * Test: should apply string search with LIKE
+     * Test: should apply a single condition
      */
-    it('should apply string search with LIKE', () => {
-      const baseFilter = { isActive: true };
-      const searchOptions = {
-        stringSearch: [{ keys: ['name'], value: 'John', mode: 'LIKE' as const }],
-      };
+    it('should apply a single condition', () => {
+      const result = SearchUtils.applySearchFilter(
+        { isActive: true },
+        { field: 'name', like: 'John' }
+      );
 
-      const result = SearchUtils.applySearchFilter(baseFilter, searchOptions);
       expect(result).toEqual({
         isActive: true,
         name: { contains: 'John' },
@@ -38,66 +37,57 @@ describe('SearchUtils', () => {
     });
 
     /**
-     * Test: should apply range search
+     * Test: should apply a range condition
      */
-    it('should apply range search', () => {
-      const baseFilter = {};
-      const searchOptions = {
-        rangeSearch: [{ keys: ['age'], min: 18, max: 65 }],
-      };
+    it('should apply a range condition', () => {
+      const result = SearchUtils.applySearchFilter({}, { field: 'age', between: [18, 65] });
 
-      const result = SearchUtils.applySearchFilter(baseFilter, searchOptions);
       expect(result).toEqual({
         age: { gte: 18, lte: 65, not: null },
       });
     });
 
     /**
-     * Test: should apply list search
+     * Test: should apply a list condition
      */
-    it('should apply list search', () => {
-      const baseFilter = {};
-      const searchOptions = {
-        listSearch: [{ keys: ['status'], values: ['active', 'pending'] }],
-      };
+    it('should apply a list condition', () => {
+      const result = SearchUtils.applySearchFilter(
+        {},
+        { field: 'status', in: ['active', 'pending'] }
+      );
 
-      const result = SearchUtils.applySearchFilter(baseFilter, searchOptions);
       expect(result).toEqual({
         status: { in: ['active', 'pending'] },
       });
     });
 
     /**
-     * Test: should handle OR grouping
+     * Test: should apply an or node
      */
-    it('should handle OR grouping', () => {
-      const baseFilter = {};
-      const searchOptions = {
-        stringSearch: [
-          { keys: ['name', 'email'], value: 'test', mode: 'LIKE' as const, grouping: 'or' as const },
+    it('should apply an or node', () => {
+      const result = SearchUtils.applySearchFilter({}, {
+        or: [
+          { field: 'name', like: 'test' },
+          { field: 'email', like: 'test' },
         ],
-      };
+      });
 
-      const result = SearchUtils.applySearchFilter(baseFilter, searchOptions);
       expect(result.OR).toBeDefined();
       expect(result.OR).toHaveLength(2);
     });
 
     /**
-     * Test: should combine multiple search types
+     * Test: should combine several conditions with a root array
      */
-    it('should combine multiple search types', () => {
-      const baseFilter = { isActive: true };
-      const searchOptions = {
-        stringSearch: [{ keys: ['name'], value: 'John', mode: 'LIKE' as const }],
-        rangeSearch: [{ keys: ['age'], min: 18 }],
-      };
+    it('should combine several conditions with a root array', () => {
+      const result = SearchUtils.applySearchFilter({ isActive: true }, [
+        { field: 'name', like: 'John' },
+        { field: 'age', gte: 18 },
+      ]);
 
-      const result = SearchUtils.applySearchFilter(baseFilter, searchOptions);
       expect(result).toEqual({
         isActive: true,
-        name: { contains: 'John' },
-        age: { gte: 18, not: null },
+        AND: [{ name: { contains: 'John' } }, { age: { gte: 18, not: null } }],
       });
     });
 
@@ -105,12 +95,8 @@ describe('SearchUtils', () => {
      * Test: should skip invalid conditions
      */
     it('should skip invalid conditions', () => {
-      const baseFilter = {};
-      const searchOptions = {
-        stringSearch: [{ keys: ['name'], value: '', mode: 'LIKE' as const }],
-      };
+      const result = SearchUtils.applySearchFilter({}, { field: 'name', like: '' });
 
-      const result = SearchUtils.applySearchFilter(baseFilter, searchOptions);
       expect(result).toEqual({});
     });
   });
@@ -235,108 +221,67 @@ describe('SearchUtils', () => {
     });
   });
 
-  describe('getCustomSearchOptionsForAll', () => {
+  describe('conditionsFrom', () => {
     /**
-     * Test: should create string search options for all string fields
+     * Test: should create one condition per string field
      */
-    it('should create string search options for all string fields', () => {
-      const filters = { name: 'John', email: 'john@example.com', age: 30 };
-      const result = SearchUtils.getCustomSearchOptionsForAll(filters);
-
-      expect(result).toHaveLength(2);
-      expect(result).toContainEqual({
-        keys: ['name'],
-        value: 'John',
-        mode: 'EXACT',
-        grouping: 'and',
+    it('should create one condition per string field', () => {
+      const result = SearchUtils.conditionsFrom({
+        name: 'John',
+        email: 'john@example.com',
+        age: 30,
       });
-      expect(result).toContainEqual({
-        keys: ['email'],
-        value: 'john@example.com',
-        mode: 'EXACT',
-        grouping: 'and',
+
+      expect(result).toEqual([
+        { field: 'name', equals: 'John' },
+        { field: 'email', equals: 'john@example.com' },
+      ]);
+    });
+
+    /**
+     * Test: should use the requested operator
+     */
+    it('should use the requested operator', () => {
+      expect(SearchUtils.conditionsFrom({ name: 'John' }, 'like'))
+        .toEqual([{ field: 'name', like: 'John' }]);
+
+      expect(SearchUtils.conditionsFrom({ name: 'John' }, 'startsWith'))
+        .toEqual([{ field: 'name', startsWith: 'John' }]);
+
+      expect(SearchUtils.conditionsFrom({ name: 'John' }, 'endsWith'))
+        .toEqual([{ field: 'name', endsWith: 'John' }]);
+    });
+
+    /**
+     * Test: should skip empty and whitespace-only strings
+     */
+    it('should skip empty and whitespace-only strings', () => {
+      const result = SearchUtils.conditionsFrom({
+        name: '',
+        nickname: '   ',
+        email: 'john@example.com',
       });
+
+      expect(result).toEqual([{ field: 'email', equals: 'john@example.com' }]);
     });
 
     /**
-     * Test: should use LIKE mode when specified
+     * Test: should return an empty array when there are no string fields
      */
-    it('should use LIKE mode when specified', () => {
-      const filters = { name: 'John' };
-      const result = SearchUtils.getCustomSearchOptionsForAll(filters, 'LIKE');
+    it('should return an empty array when there are no string fields', () => {
+      expect(SearchUtils.conditionsFrom({ age: 30, isActive: true })).toEqual([]);
+    });
 
-      expect(result[0]).toEqual({
-        keys: ['name'],
-        value: 'John',
-        mode: 'LIKE',
-        grouping: 'and',
+    /**
+     * Test: the result should drop straight into a search tree
+     */
+    it('should produce conditions usable as a search tree', () => {
+      const conditions = SearchUtils.conditionsFrom({ name: 'John', email: 'john' }, 'like');
+      const result = SearchUtils.applySearchFilter({}, { or: conditions });
+
+      expect(result).toEqual({
+        OR: [{ name: { contains: 'John' } }, { email: { contains: 'john' } }],
       });
-    });
-
-    /**
-     * Test: should use OR grouping when specified
-     */
-    it('should use OR grouping when specified', () => {
-      const filters = { name: 'John' };
-      const result = SearchUtils.getCustomSearchOptionsForAll(filters, 'EXACT', 'or');
-
-      expect(result[0]).toEqual({
-        keys: ['name'],
-        value: 'John',
-        mode: 'EXACT',
-        grouping: 'or',
-      });
-    });
-
-    /**
-     * Test: should skip empty strings
-     */
-    it('should skip empty strings', () => {
-      const filters = { name: '', email: 'john@example.com' };
-      const result = SearchUtils.getCustomSearchOptionsForAll(filters);
-
-      expect(result).toHaveLength(1);
-      expect(result[0].keys).toEqual(['email']);
-    });
-
-    /**
-     * Test: should skip whitespace-only strings
-     */
-    it('should skip whitespace-only strings', () => {
-      const filters = { name: '   ', email: 'john@example.com' };
-      const result = SearchUtils.getCustomSearchOptionsForAll(filters);
-
-      expect(result).toHaveLength(1);
-    });
-
-    /**
-     * Test: should return empty array for no string fields
-     */
-    it('should return empty array for no string fields', () => {
-      const filters = { age: 30, isActive: true };
-      const result = SearchUtils.getCustomSearchOptionsForAll(filters);
-
-      expect(result).toEqual([]);
-    });
-
-    /**
-     * Test: should handle STARTS_WITH mode
-     */
-    it('should handle STARTS_WITH mode', () => {
-      const filters = { name: 'John' };
-      const result = SearchUtils.getCustomSearchOptionsForAll(filters, 'STARTS_WITH');
-
-      expect(result[0].mode).toBe('STARTS_WITH');
-    });
-
-    /**
-     * Test: should handle ENDS_WITH mode
-     */
-    it('should handle ENDS_WITH mode', () => {
-      const filters = { name: 'John' };
-      const result = SearchUtils.getCustomSearchOptionsForAll(filters, 'ENDS_WITH');
-
-      expect(result[0].mode).toBe('ENDS_WITH');
     });
   });
 
