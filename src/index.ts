@@ -324,24 +324,43 @@ export { Property } from './core/decorators/property.decorator';
 
 /**
  * Search Utilities
- * 
+ *
  * Advanced search and filtering capabilities:
- * - SearchUtils: Apply search filters and conditions to queries
- * - SearchBuilder: Fluent API for building complex search queries
- * - ConditionUtils: Build Prisma where conditions from search criteria
+ * - SearchResolver: Resolve a search tree into a Prisma `where` clause
+ * - SearchUtils: Combine base filters with a search tree
+ * - anyOf / allOf: Apply one condition to several fields
+ * - ConditionUtils: Validate filter values
  * - ObjectUtils: Object manipulation utilities for search operations
  */
 export { default as SearchUtils } from './core/search-utils';
-export { default as SearchBuilder } from './core/search-builder';
+export { default as SearchResolver } from './core/search-resolver';
+export { anyOf, allOf } from './core/search-helpers';
 export { default as ConditionUtils } from './core/condition-utils';
 export { default as ObjectUtils } from './core/object-utils';
 
 /**
  * Types
- * 
- * TypeScript type definitions for search, pagination, and filtering
+ *
+ * TypeScript type definitions for search, pagination, and filtering.
+ *
+ * `Search` carries the query tree types, so a search can be typed, stored in a variable, built
+ * in another module, or received over the wire:
+ *
+ * ```typescript
+ * import type { Search } from 'prisma-entity-framework';
+ *
+ * const recent: Search.Node = { field: 'createdAt', gte: cutoff };
+ *
+ * function buildUserSearch(query: string): Search.Input {
+ *     return { or: [
+ *         { field: 'name', like: query },
+ *         { field: 'email', like: query }
+ *     ] };
+ * }
+ * ```
  */
 export * from './core/structures/types/search.types';
+export type { Search } from './core/structures/types/search.types';
 
 /**
  * Interfaces
