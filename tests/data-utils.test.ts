@@ -187,7 +187,7 @@ describe('DataUtils', () => {
         fields: [
           { name: 'title', kind: 'scalar', type: 'String' },
           { name: 'metadata', kind: 'scalar', type: 'Json' },
-          { name: 'author', kind: 'object', type: 'User' },
+          { name: 'author', kind: 'object', type: 'User', relationName: 'PostToUser' },
         ],
       };
 
@@ -258,7 +258,7 @@ describe('DataUtils', () => {
           { name: 'title', kind: 'scalar', type: 'String', isList: false },
           { name: 'tags', kind: 'scalar', type: 'String', isList: true }, // String[]
           { name: 'ratings', kind: 'scalar', type: 'Int', isList: true }, // Int[]
-          { name: 'author', kind: 'object', type: 'User', isList: false },
+          { name: 'author', kind: 'object', type: 'User', isList: false, relationName: 'PostToUser' },
         ],
       };
 
@@ -327,13 +327,45 @@ describe('DataUtils', () => {
     });
 
     /**
+     * Test: should write embedded (composite) documents inline, not as relations
+     */
+    it('should preserve an embedded document without wrapping in create', () => {
+      const modelInfo = {
+        fields: [
+          { name: 'name', kind: 'scalar', type: 'String' },
+          // composite fields: kind object, no relationName
+          { name: 'dimensions', kind: 'object', type: 'Dimensions', isList: false },
+          { name: 'specs', kind: 'object', type: 'Spec', isList: true },
+          // a real relation carries a relationName
+          { name: 'author', kind: 'object', type: 'User', isList: false, relationName: 'ProductToUser' },
+        ],
+      };
+
+      const data = {
+        name: 'Product',
+        dimensions: { width: 10, height: 5 },
+        specs: [{ key: 'cpu', value: 'x86' }],
+        author: { id: 1 },
+      };
+
+      const result = DataUtils.processRelations(data, modelInfo);
+
+      expect(result).toEqual({
+        name: 'Product',
+        dimensions: { width: 10, height: 5 }, // embedded, inline
+        specs: [{ key: 'cpu', value: 'x86' }], // embedded list, inline
+        author: { connect: { id: 1 } }, // relation, wrapped
+      });
+    });
+
+    /**
      * Test: should distinguish between scalar arrays and relation arrays
      */
     it('should distinguish between scalar arrays and relation arrays', () => {
       const modelInfo = {
         fields: [
           { name: 'tags', kind: 'scalar', type: 'String', isList: true }, // Scalar array
-          { name: 'comments', kind: 'object', type: 'Comment', isList: true }, // Relation array
+          { name: 'comments', kind: 'object', type: 'Comment', isList: true, relationName: 'PostToComment' }, // Relation array
         ],
       };
 

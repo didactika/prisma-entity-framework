@@ -64,6 +64,27 @@ class Job extends BaseEntity<IJob> implements IJob {
   }
 }
 
+interface IProduct {
+  id?: number;
+  name: string;
+  sku: string;
+  metadata?: unknown;
+}
+
+class Product extends BaseEntity<IProduct> implements IProduct {
+  static override readonly model: PrismaClient['product'];
+
+  public declare readonly id?: IProduct['id'];
+
+  @Property() declare name: IProduct['name'];
+  @Property() declare sku: IProduct['sku'];
+  @Property() declare metadata: IProduct['metadata'];
+
+  constructor(data?: Partial<IProduct>) {
+    super(data);
+  }
+}
+
 describe('Search tree - Integration Tests', () => {
   let db: Awaited<ReturnType<typeof createTestDb>>;
   let prisma: PrismaClient;
@@ -76,6 +97,7 @@ describe('Search tree - Integration Tests', () => {
 
     (User as any).model = prisma.user;
     (Job as any).model = prisma.job;
+    (Product as any).model = prisma.product;
     configurePrisma(prisma as any);
   }, 30000);
 
@@ -405,9 +427,16 @@ describe('Search tree - Integration Tests', () => {
       });
     });
 
-    /** Builds an id list past the 10k chunk threshold, most of whose values do not exist */
-    const oversizedIds = (realIds: number[]) => {
-      const padding = Array.from({ length: 10_050 }, (_, i) => 900_000 + i);
+    /**
+     * Builds an id list past the 10k chunk threshold, most of whose values do not exist.
+     * The padding matches the id type of the provider — numeric ids on SQL, 24-char hex ObjectId
+     * strings on MongoDB — since a mixed-type `in` list is rejected there.
+     */
+    const oversizedIds = (realIds: Array<number | string>) => {
+      const asStrings = db.provider === 'mongodb';
+      const padding = Array.from({ length: 10_050 }, (_, i) =>
+        asStrings ? i.toString(16).padStart(24, '0') : 900_000 + i
+      );
       return [...realIds, ...padding];
     };
 
@@ -664,6 +693,105 @@ describe('Search tree - Integration Tests', () => {
       }) as IUser[];
 
       expect(users).toHaveLength(0);
+    });
+  });
+
+  /**
+   * JSON attribute filtering through dot notation. When a path enters a `Json` column, the rest
+   * becomes a JSON filter. Providers differ in how much of it Prisma supports, so each test is
+   * guarded to the providers that can run it.
+   */
+  describe('JSON columns via dot notation', () => {
+    // Providers with a JSON column type: PostgreSQL and MySQL. SQLite has none.
+    const hasJson = () => db.provider === 'postgresql' || db.provider === 'mysql';
+    // The rich operators (string_contains, comparisons, array_contains) are PostgreSQL-only.
+    const richJson = () => db.provider === 'postgresql';
+
+    const skip = (predicate: () => boolean, label: string) => {
+      if (!predicate()) {
+        console.log(`⏭️  Skipping ${label} (current: ${db.provider.toUpperCase()})`);
+        return true;
+      }
+      return false;
+    };
+
+    beforeEach(async () => {
+      if (!hasJson()) return;
+
+      await db.clear();
+      await (prisma as any).product.createMany({
+        data: [
+          { name: 'Uno', sku: 'SKU-1', metadata: { color: 'red', dimensions: { width: 10 }, brand: 'Acme', tags: ['sale', 'new'] } },
+          { name: 'Dos', sku: 'SKU-2', metadata: { color: 'blue', dimensions: { width: 20 }, brand: 'ACME', tags: ['new'] } },
+          { name: 'Tres', sku: 'SKU-3', metadata: { color: 'red', dimensions: { width: 30 }, brand: 'Other', tags: ['sale', 'clearance'] } }
+        ]
+      });
+    });
+
+    it('should filter by a top-level JSON attribute (equals, all providers)', async () => {
+      if (skip(hasJson, 'JSON equals')) return;
+
+      const products = await Product.findByFilter({}, {
+        search: { field: 'metadata.color', equals: 'red' }
+      }) as IProduct[];
+
+      expect(products.map(p => p.name).sort()).toEqual(['Tres', 'Uno']);
+    });
+
+    it('should filter by a nested JSON attribute with a comparison', async () => {
+      if (skip(richJson, 'JSON comparison')) return;
+
+      const products = await Product.findByFilter({}, {
+        search: { field: 'metadata.dimensions.width', gte: 20 }
+      }) as IProduct[];
+
+      expect(products.map(p => p.name).sort()).toEqual(['Dos', 'Tres']);
+    });
+
+    it('should filter a JSON string attribute case-insensitively by default', async () => {
+      if (skip(richJson, 'JSON string_contains')) return;
+
+      const products = await Product.findByFilter({}, {
+        search: { field: 'metadata.brand', like: 'acme' }
+      }) as IProduct[];
+
+      // matches both 'Acme' and 'ACME'
+      expect(products.map(p => p.name).sort()).toEqual(['Dos', 'Uno']);
+    });
+
+    it('should query a JSON array element by index', async () => {
+      if (skip(richJson, 'JSON array index')) return;
+
+      const products = await Product.findByFilter({}, {
+        search: { field: 'metadata.tags.0', equals: 'sale' }
+      }) as IProduct[];
+
+      expect(products.map(p => p.name).sort()).toEqual(['Tres', 'Uno']);
+    });
+
+    it('should query whether a JSON array contains a value (hasEvery)', async () => {
+      if (skip(richJson, 'JSON array_contains')) return;
+
+      const products = await Product.findByFilter({}, {
+        search: { field: 'metadata.tags', hasEvery: ['sale'] }
+      } as any) as IProduct[];
+
+      expect(products.map(p => p.name).sort()).toEqual(['Tres', 'Uno']);
+    });
+
+    it('should combine a JSON filter with the rest of the tree', async () => {
+      if (skip(richJson, 'JSON in a tree')) return;
+
+      const products = await Product.findByFilter({}, {
+        search: {
+          and: [
+            { field: 'metadata.color', equals: 'red' },
+            { field: 'metadata.dimensions.width', gte: 20 }
+          ]
+        }
+      }) as IProduct[];
+
+      expect(products.map(p => p.name)).toEqual(['Tres']);
     });
   });
 

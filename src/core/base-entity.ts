@@ -684,6 +684,66 @@ export default abstract class BaseEntity<
     }
 
     /**
+     * Applies one set of changes to every record matching a filter and search.
+     *
+     * The sibling of {@link deleteByFilter}: where that removes the matching rows, this updates
+     * them, all with the same `data`. For per-row changes keyed by id, use `updateManyById`.
+     *
+     * @param filter - Base equality filter, ANDed with `options.search`
+     * @param data - The changes to apply to every matching row
+     * @param options - `search` to narrow the rows, `tx` to run inside a transaction
+     * @returns The number of updated records
+     *
+     * @remarks
+     * Maps to Prisma's `updateMany`, so `data` sets scalar fields and foreign keys — relations by
+     * id are normalised to their FK, but nested relation writes (create/connect) are not supported.
+     * `id`, `createdAt` and empty values are stripped. An empty `filter` with no `search` matches
+     * every row, exactly like `deleteByFilter`.
+     *
+     * @example
+     * ```typescript
+     * // mark every pending job that is overdue as failed
+     * const changed = await Job.updateByFilter(
+     *   { status: 'PENDING' },
+     *   { status: 'FAILED' },
+     *   { search: { field: 'scheduledFor', lte: new Date() } }
+     * );
+     * ```
+     */
+    public static async updateByFilter<TModel extends object>(
+        this: BaseEntityCtor<TModel>,
+        filter: Partial<TModel>,
+        data: Partial<TModel>,
+        options?: FindByFilterOptions.Options & EntityOperationOptions
+    ): Promise<number> {
+        const entityModel = resolveModel(this.model, options?.tx);
+        const getModelInformation = () => this.getModelInformation();
+
+        let modelInfo: ReturnType<typeof ModelUtils.getModelInformationCached> | null = null;
+        try {
+            modelInfo = this.getModelInformation();
+        } catch {
+        }
+
+        // Same preparation pipeline as instance update(): drop the primary key, sanitise keys, turn
+        // relation objects into foreign keys, and strip createdAt/empty values — leaving a scalar
+        // payload updateMany accepts.
+        const { id: _ignoredId, ...changes } = data as Record<string, unknown>;
+        const cleanData = BaseEntityHelpers.sanitizeKeysRecursive(changes);
+        const processedData = DataUtils.processRelations(cleanData, modelInfo);
+        const normalized = DataUtils.normalizeRelationsToFK(processedData, k => `${k}Id`);
+        const pruned = BaseEntityHelpers.pruneUpdatePayload(normalized);
+
+        return BaseEntityQuery.updateByFilter<TModel>(
+            entityModel,
+            getModelInformation,
+            filter,
+            pruned,
+            options
+        );
+    }
+
+    /**
      * Delete multiple entities by their IDs in parallel batches
      * 
      * @param ids - Array of IDs to delete
