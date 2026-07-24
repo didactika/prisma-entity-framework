@@ -123,6 +123,7 @@ await User.createMany(items, { tx });
 await User.updateManyById(dataList, { tx });
 await User.upsertMany(items, { tx });
 await User.upsert(data, { tx });
+await User.updateByFilter(filter, data, { tx });
 await User.deleteByFilter(filter, { tx });
 await User.deleteByIds(ids, { tx });
 await User.findByFilter(filter, { tx });
@@ -232,6 +233,28 @@ const result = await User.upsertMany([
     concurrency: 4
 });
 // { created: 2, updated: 1, unchanged: 0, total: 3 }
+```
+
+#### `updateByFilter<T>(filter, data, options?): Promise<number>`
+Apply one set of changes to every record matching the filter (and `options.search`). The sibling of
+`deleteByFilter`. For per-row changes keyed by id, use `updateManyById`.
+
+**Parameters:**
+- `filter` - Base equality filter, ANDed with `options.search`
+- `data` - The changes to apply to every matching row (scalar fields and foreign keys)
+- `options.search` - Search tree to narrow the rows
+- `options.tx` - Run inside a transaction
+
+Maps to Prisma's `updateMany`: `data` sets scalar fields and FK relations by id, not nested relation
+writes. `id`, `createdAt` and empty values are stripped; an empty payload updates nothing.
+
+```typescript
+// mark every overdue pending job as failed
+const changed = await Job.updateByFilter(
+    { status: 'PENDING' },
+    { status: 'FAILED' },
+    { search: { field: 'scheduledFor', lte: new Date() } }
+);
 ```
 
 #### `deleteByFilter<T>(filter): Promise<number>`

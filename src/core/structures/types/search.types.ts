@@ -83,6 +83,21 @@ export namespace Search {
          * A condition targets one field and nothing else. To apply the same operator to several
          * fields use several conditions inside an `or`/`and` node — grouping always lives in the
          * tree, never inside the leaf. See {@link anyOf} / {@link allOf} for the shorthand.
+         *
+         * **JSON columns and embedded documents are reached the same way.** When a segment names a
+         * `Json` column, everything after it becomes a path *inside* the JSON value; when it names
+         * a MongoDB embedded type, the rest addresses the embedded document. A numeric-looking
+         * segment inside a JSON path is treated as an array index.
+         *
+         * ```typescript
+         * { field: 'metadata.dimensions.width', gte: 10 }  // inside a JSON column
+         * { field: 'metadata.tags.0', equals: 'sale' }     // a JSON array element
+         * { field: 'dimensions.width', gte: 10 }           // a MongoDB embedded document
+         * ```
+         *
+         * Reaching inside a JSON value needs model information, which `findByFilter` always
+         * supplies. See the Search Contract docs for which operators each provider's JSON support
+         * covers.
          */
         field: string;
 

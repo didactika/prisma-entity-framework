@@ -268,11 +268,78 @@ export default class BaseEntityQuery {
     ): Promise<number> {
         if (!entityModel) throw new Error("The model is not defined in the BaseEntity class.");
 
+        const whereClause = this.buildFilterWhere(entityModel, getModelInformation, filter, options, "deleteByFilter");
+
+        try {
+            const result = await entityModel.deleteMany({
+                where: whereClause
+            });
+            return result.count || 0;
+        } catch (error) {
+            logError("deleteByFilter", error as Error, { modelName: entityModel.name });
+            return 0;
+        }
+    }
+
+    /**
+     * Applies one set of changes to every record matching a filter and search
+     *
+     * @template TModel - The entity type
+     * @param entityModel - The Prisma model (delegate) to query
+     * @param getModelInformation - Function to get model information
+     * @param filter - Base equality filter, ANDed with the search
+     * @param data - The already-prepared update payload (scalar fields and foreign keys)
+     * @param options - Query options; only `search` and `tx` are used here
+     * @returns Promise<number> - The number of updated records
+     *
+     * @remarks
+     * Maps to Prisma's `updateMany`, so `data` may only set scalar fields and foreign keys — not
+     * nested relation writes. An empty payload updates nothing and returns 0 without a query.
+     */
+    public static async updateByFilter<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
+        getModelInformation: () => ModelInfo,
+        filter: Partial<TModel>,
+        data: Record<string, unknown>,
+        options?: FindByFilterOptions.Options
+    ): Promise<number> {
+        if (!entityModel) throw new Error("The model is not defined in the BaseEntity class.");
+
+        if (!data || Object.keys(data).length === 0) return 0;
+
+        const whereClause = this.buildFilterWhere(entityModel, getModelInformation, filter, options, "updateByFilter");
+
+        try {
+            const result = await entityModel.updateMany({
+                where: whereClause,
+                data
+            });
+            return result.count || 0;
+        } catch (error) {
+            logError("updateByFilter", error as Error, { modelName: entityModel.name });
+            return 0;
+        }
+    }
+
+    /**
+     * Builds the `where` clause shared by the filter-based mutations
+     *
+     * @param context - Caller name, for error logging
+     * @returns The combined base filter and search tree
+     * @private
+     */
+    private static buildFilterWhere<TModel extends object>(
+        entityModel: EntityPrismaModel<TModel>,
+        getModelInformation: () => ModelInfo,
+        filter: Partial<TModel>,
+        options: FindByFilterOptions.Options | undefined,
+        context: string
+    ): Record<string, unknown> {
         let modelInfo: ModelInfo | null = null;
         try {
             modelInfo = getModelInformation();
         } catch (error) {
-            logError("deleteByFilter - getModelInformation", error as Error, {
+            logError(`${context} - getModelInformation`, error as Error, {
                 modelName: entityModel.name
             });
         }
@@ -289,15 +356,7 @@ export default class BaseEntityQuery {
             ) as Record<string, unknown>;
         }
 
-        try {
-            const result = await entityModel.deleteMany({
-                where: whereClause
-            });
-            return result.count || 0;
-        } catch (error) {
-            logError("deleteByFilter", error as Error, { modelName: entityModel.name });
-            return 0;
-        }
+        return whereClause;
     }
 
     private static sortResults<TModel extends object>(

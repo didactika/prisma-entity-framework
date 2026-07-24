@@ -3,7 +3,7 @@
  *
  */
 
-import { describe, it, expect, afterEach } from '@jest/globals';
+import { describe, it, expect, afterEach, beforeEach } from '@jest/globals';
 import SearchResolver from '../src/core/search-resolver';
 import { anyOf, allOf } from '../src/core/search-helpers';
 import { Search } from '../src/core/structures/types/search.types';
@@ -834,6 +834,155 @@ describe('SearchResolver', () => {
 
       expect(SearchResolver.resolve({ field: 'price', gte: 10 }))
         .toEqual({ price: { gte: 10, not: null } });
+    });
+  });
+
+  /**
+   * JSON attribute filtering via dot notation: a path that dives into a `Json` column becomes a
+   * Prisma JSON filter. The JSON column is detected from model info, so these tests carry a
+   * modelInfo where `metadata` is a Json field, and configure a provider stub since Prisma's JSON
+   * filters are provider-specific.
+   */
+  describe('JSON columns via dot notation', () => {
+    const jsonModel = {
+      fields: [
+        { name: 'metadata', kind: 'scalar', isRequired: false, type: 'Json' },
+        { name: 'name', kind: 'scalar', isRequired: true, type: 'String' }
+      ]
+    };
+
+    const configureProvider = (provider: string, models: Record<string, unknown> = {}) => {
+      configurePrisma({
+        _engineConfig: { datasources: [{ activeProvider: provider }] },
+        _runtimeDataModel: { models }
+      } as any);
+    };
+
+    afterEach(() => {
+      resetPrismaConfiguration();
+    });
+
+    describe('on PostgreSQL', () => {
+      beforeEach(() => configureProvider('postgresql'));
+
+      it('should turn a dotted path into a JSON filter with an array path', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.color', equals: 'red' }, jsonModel))
+          .toEqual({ metadata: { path: ['color'], equals: 'red' } });
+      });
+
+      it('should support a nested path', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.dimensions.width', gte: 10 }, jsonModel))
+          .toEqual({ metadata: { path: ['dimensions', 'width'], gte: 10 } });
+      });
+
+      it('should map like to string_contains', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.name', like: 'jo', insensitive: false }, jsonModel))
+          .toEqual({ metadata: { path: ['name'], string_contains: 'jo' } });
+      });
+
+      it('should map startsWith and endsWith', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.sku', startsWith: 'AB', insensitive: false }, jsonModel))
+          .toEqual({ metadata: { path: ['sku'], string_starts_with: 'AB' } });
+
+        expect(SearchResolver.resolve({ field: 'metadata.sku', endsWith: '99', insensitive: false }, jsonModel))
+          .toEqual({ metadata: { path: ['sku'], string_ends_with: '99' } });
+      });
+
+      it('should map between to gte + lte', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.score', between: [1, 5] }, jsonModel))
+          .toEqual({ metadata: { path: ['score'], gte: 1, lte: 5 } });
+      });
+
+      it('should carry mode:insensitive on string filters by default', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.name', like: 'jo' }, jsonModel))
+          .toEqual({ metadata: { path: ['name'], string_contains: 'jo', mode: 'insensitive' } });
+      });
+
+      it('should not add a case mode to a non-string JSON filter', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.n', gte: 3 }, jsonModel))
+          .toEqual({ metadata: { path: ['n'], gte: 3 } });
+      });
+
+      it('should treat a numeric segment as an array index (stringified for Prisma)', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.tags.0', equals: 'x' }, jsonModel))
+          .toEqual({ metadata: { path: ['tags', '0'], equals: 'x' } });
+      });
+
+      it('should map hasEvery to array_contains for a JSON array', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.tags', hasEvery: ['a', 'b'] } as any, jsonModel))
+          .toEqual({ metadata: { path: ['tags'], array_contains: ['a', 'b'] } });
+      });
+
+      it('should reach a JSON column through a relation', () => {
+        // author → User → metadata (Json). The related model must be resolvable.
+        configureProvider('postgresql', {
+          User: { fields: [{ name: 'metadata', kind: 'scalar', isRequired: false, type: 'Json' }] }
+        });
+
+        const modelInfo = {
+          fields: [{ name: 'author', kind: 'object', isList: false, type: 'User' }]
+        };
+
+        expect(SearchResolver.resolve({ field: 'author.metadata.tier', equals: 'gold' }, modelInfo))
+          .toEqual({ author: { is: { metadata: { path: ['tier'], equals: 'gold' } } } });
+      });
+
+      it('should not add the implicit not:null of a scalar range', () => {
+        const result = SearchResolver.resolve({ field: 'metadata.n', gte: 3 }, jsonModel) as any;
+        expect(result.metadata).not.toHaveProperty('not');
+      });
+
+      it('should drop an operator with no JSON equivalent', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.a', in: ['x'] } as any, jsonModel)).toBeNull();
+        expect(SearchResolver.resolve({ field: 'metadata.a', hasSome: ['x'] } as any, jsonModel)).toBeNull();
+      });
+
+      it('should drop a condition whose value is empty', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.a', like: '' }, jsonModel)).toBeNull();
+      });
+
+      it('should ignore orNull inside a JSON path', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.a', equals: 'x', orNull: true }, jsonModel))
+          .toEqual({ metadata: { path: ['a'], equals: 'x' } });
+      });
+
+      it('should treat a bare JSON column with no sub-path as a whole-column filter', () => {
+        expect(SearchResolver.resolve({ field: 'metadata', equals: { a: 1 } }, jsonModel))
+          .toEqual({ metadata: { equals: { a: 1 } } });
+      });
+
+      it('should leave a plain scalar path untouched', () => {
+        expect(SearchResolver.resolve({ field: 'name', like: 'x', insensitive: false }, jsonModel))
+          .toEqual({ name: { contains: 'x' } });
+      });
+    });
+
+    describe('on MySQL', () => {
+      beforeEach(() => configureProvider('mysql'));
+
+      it('should format the path as a $.a.b JSONPath string', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.dimensions.width', equals: 10 }, jsonModel))
+          .toEqual({ metadata: { path: '$.dimensions.width', equals: 10 } });
+      });
+
+      it('should render an array index as [n]', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.tags.0', equals: 'x' }, jsonModel))
+          .toEqual({ metadata: { path: '$.tags[0]', equals: 'x' } });
+      });
+
+      it('should not carry a case mode, which MySQL JSON filters reject', () => {
+        expect(SearchResolver.resolve({ field: 'metadata.name', like: 'jo' }, jsonModel))
+          .toEqual({ metadata: { path: '$.name', string_contains: 'jo' } });
+      });
+    });
+
+    describe('without model info', () => {
+      it('should fall back to plain nesting, unable to detect the JSON column', () => {
+        // findByFilter always supplies model info; a raw resolve() without it cannot know
+        // `metadata` is JSON, so the path nests plainly.
+        expect(SearchResolver.resolve({ field: 'metadata.color', equals: 'red' }))
+          .toEqual({ metadata: { color: { equals: 'red' } } });
+      });
     });
   });
 

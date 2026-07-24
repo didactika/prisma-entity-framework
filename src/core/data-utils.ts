@@ -153,6 +153,7 @@ export default class DataUtils {
         // Build sets for quick lookup
         const jsonFields = new Set<string>();
         const scalarArrayFields = new Set<string>();
+        const compositeFields = new Set<string>();
 
         if (isPrismaModelInfo(modelInfo)) {
             for (const field of modelInfo.fields) {
@@ -163,6 +164,12 @@ export default class DataUtils {
                 // Track scalar arrays (String[], Int[], etc.) - these should not be processed as relations
                 if (field.kind === 'scalar' && field.isList === true) {
                     scalarArrayFields.add(field.name);
+                }
+                // Track MongoDB embedded (composite) types: kind 'object' but no relation. A real
+                // relation carries a relationName; a composite points at an embedded type and has
+                // none. Composites are written inline, not via connect/create.
+                if (field.kind === 'object' && !field.relationName) {
+                    compositeFields.add(field.name);
                 }
             }
         }
@@ -180,6 +187,12 @@ export default class DataUtils {
             // Skip processing if this is a scalar array (e.g., String[], Int[])
             if (scalarArrayFields.has(key)) {
                 // Keep scalar arrays as-is
+                processedData[key] = value;
+                continue;
+            }
+
+            // Skip processing if this is an embedded (composite) document — written inline
+            if (compositeFields.has(key)) {
                 processedData[key] = value;
                 continue;
             }

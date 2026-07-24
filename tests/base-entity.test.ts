@@ -439,6 +439,80 @@ describe('BaseEntity', () => {
     });
   });
 
+  describe('updateByFilter', () => {
+    /**
+     * Test: should call updateMany with the built where and prepared data
+     */
+    it('should call updateMany with the where and data', async () => {
+      const updateManySpy = jest.spyOn(mockPrismaClient.user, 'updateMany');
+
+      await User.updateByFilter({ isActive: false }, { name: 'Archived' });
+
+      expect(updateManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { isActive: { equals: false } },
+          data: { name: 'Archived' }
+        })
+      );
+    });
+
+    /**
+     * Test: should combine the base filter with a search tree
+     */
+    it('should narrow the rows with a search tree', async () => {
+      const updateManySpy = jest.spyOn(mockPrismaClient.user, 'updateMany');
+
+      await User.updateByFilter(
+        { isActive: true },
+        { name: 'Flagged' },
+        { search: { field: 'age', gte: 18 } }
+      );
+
+      expect(updateManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { isActive: { equals: true }, age: { gte: 18 } },
+          data: { name: 'Flagged' }
+        })
+      );
+    });
+
+    /**
+     * Test: should strip id and createdAt from the payload
+     */
+    it('should strip id and createdAt from the data', async () => {
+      const updateManySpy = jest.spyOn(mockPrismaClient.user, 'updateMany');
+
+      await User.updateByFilter(
+        { isActive: false },
+        { id: 99, name: 'X', createdAt: new Date() } as any
+      );
+
+      const call = updateManySpy.mock.calls[updateManySpy.mock.calls.length - 1][0] as any;
+      expect(call.data).toEqual({ name: 'X' });
+    });
+
+    /**
+     * Test: should not query when there is nothing to update
+     */
+    it('should return 0 and skip the query for an empty payload', async () => {
+      const updateManySpy = jest.spyOn(mockPrismaClient.user, 'updateMany');
+      const callsBefore = updateManySpy.mock.calls.length;
+
+      const result = await User.updateByFilter({ isActive: false }, {} as any);
+
+      expect(result).toBe(0);
+      expect(updateManySpy.mock.calls.length).toBe(callsBefore);
+    });
+
+    /**
+     * Test: should return the count of updated rows
+     */
+    it('should return the number of updated rows', async () => {
+      const result = await User.updateByFilter({}, { isActive: true });
+      expect(typeof result).toBe('number');
+    });
+  });
+
   describe('toJson and toObject', () => {
     /**
      * Test: should convert to JSON string

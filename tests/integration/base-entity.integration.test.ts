@@ -626,6 +626,54 @@ describe('BaseEntity - Integration Tests with Real Database', () => {
     });
   });
 
+  describe('updateByFilter', () => {
+    beforeEach(async () => {
+      await db.seed();
+    });
+
+    it('should update every row matching a base filter', async () => {
+      // seed: John (active), Jane (active), Bob (inactive)
+      const count = await User.updateByFilter({ isActive: true }, { name: 'Renamed' });
+
+      expect(count).toBe(2);
+
+      const renamed = await prisma.user.findMany({ where: { name: 'Renamed' } });
+      expect(renamed.length).toBe(2);
+      expect(renamed.every((u: any) => u.isActive)).toBe(true);
+    });
+
+    it('should narrow the rows with a search tree', async () => {
+      // only the active users aged 26+ → John (30), not Jane (25)
+      const count = await User.updateByFilter(
+        { isActive: true },
+        { name: 'Senior' },
+        { search: { field: 'age', gte: 26 } }
+      );
+
+      expect(count).toBe(1);
+
+      const seniors = await prisma.user.findMany({ where: { name: 'Senior' } });
+      expect(seniors.map((u: any) => u.email)).toEqual(['john@example.com']);
+    });
+
+    it('should update no rows when nothing matches', async () => {
+      const count = await User.updateByFilter({ email: 'nobody@example.com' }, { name: 'X' });
+
+      expect(count).toBe(0);
+    });
+
+    it('should return 0 without touching rows for an empty payload', async () => {
+      const before = await prisma.user.findMany({ orderBy: { email: 'asc' } });
+
+      const count = await User.updateByFilter({ isActive: true }, {} as any);
+
+      expect(count).toBe(0);
+
+      const after = await prisma.user.findMany({ orderBy: { email: 'asc' } });
+      expect(after.map((u: any) => u.name)).toEqual(before.map((u: any) => u.name));
+    });
+  });
+
   describe('Relations', () => {
     beforeEach(async () => {
       await db.seed();
