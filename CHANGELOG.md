@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-07-24
+
+### Added
+
+- **`updateByFilter(filter, data, options?)`** — applies one set of changes to every record matching
+  a filter and search, the sibling of `deleteByFilter`. Fills the gap between `updateManyById`
+  (per-row changes keyed by id) and a bulk "set these fields on everything that matches". Maps to
+  Prisma's `updateMany`, so `data` sets scalar fields and foreign keys; `id`/`createdAt`/empty values
+  are stripped and an empty payload is a no-op. Supports `options.search` and `options.tx`.
+
+  ```typescript
+  await Job.updateByFilter(
+    { status: 'PENDING' },
+    { status: 'FAILED' },
+    { search: { field: 'scheduledFor', lte: new Date() } }
+  );
+  ```
+- **JSON attribute filtering through dot notation.** When a path enters a `Json` column, everything
+  after it becomes a filter *inside* the JSON value — no new field, the ordinary `field` path is
+  reused:
+
+  ```typescript
+  { field: 'metadata.dimensions.width', gte: 10 }  // WHERE metadata #> '{dimensions,width}' >= 10
+  { field: 'metadata.color', equals: 'red' }
+  { field: 'author.metadata.tier', equals: 'gold' } // a JSON column reached through a relation
+  ```
+
+  The JSON column is detected from model information, which `findByFilter` always supplies. The path
+  format follows the provider (string array on PostgreSQL, `$.a.b` on MySQL) and the text operators
+  map to Prisma's `string_contains` family. Supported inside a path: `equals`, `like`, `startsWith`,
+  `endsWith`, `gt`/`gte`/`lt`/`lte`, `between`, and `hasEvery` → `array_contains`.
+- **Search inside JSON arrays.** A numeric segment is an array index —
+  `{ field: 'metadata.tags.0', equals: 'sale' }` — and `hasEvery` asks whether a JSON array holds
+  values: `{ field: 'metadata.tags', hasEvery: ['sale'] }` → `array_contains`.
+- **Provider coverage for JSON.** `equals` works on PostgreSQL and MySQL; the rich operators are
+  PostgreSQL-only, which is the extent of Prisma's JSON filtering. SQLite has no JSON column type.
+  Verified against live PostgreSQL and MySQL.
+- **MongoDB embedded (composite) documents.** A dotted path into an embedded type resolves to
+  Prisma's composite filter — `is` for a single document, the `relation` quantifier
+  (`some` / `every` / `none`) for a list:
+
+  ```typescript
+  { field: 'dimensions.width', gte: 10 }                       // single embedded → is
+  { field: 'specs.value', equals: 'x86', relation: 'some' }    // list → some / every / none
+  ```
+
+  Creating them in one call now works too — `new Product({ dimensions: {...}, specs: [...] }).create()`.
+  Verified against a live MongoDB replica set.
+- **Integration tests**: `tests/integration/embedded-documents.integration.test.ts` (MongoDB, 12
+  tests) and a JSON-columns block in `tests/integration/search-tree.integration.test.ts`
+  (PostgreSQL / MySQL).
+
+### Fixed
+
+- **Single embedded documents were mis-created as relations.** `DataUtils.processRelations` wrapped
+  any nested object in `{ create: … }`, so `new Product({ dimensions: { width: 10 } }).create()`
+  produced `dimensions: { create: … }` and Prisma rejected it with *Unknown argument `create`*.
+  Embedded (composite) fields — a `kind: 'object'` field with no `relationName` — are now written
+  inline. Lists already worked by accident; single documents now do too.
+- **Nullability of embedded subfields was misread.** Relation resolution only consulted the runtime
+  data model's `models` map, not its `types` map, so a range comparison on a required subfield of a
+  MongoDB embedded document got a spurious implicit `not: null` — which MongoDB rejects with
+  *Argument `not` must not be null*. Composite types are now read from both maps.
+
 ## [3.0.0] - 2026-07-22
 
 ### Changed — BREAKING
@@ -95,7 +159,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are pruned before emission, so `OR: []` — which Prisma reads as *match nothing* — cannot be
   produced. And a base filter carrying its own `OR` is no longer widened by the search: the search
   fragment nests under `AND` instead.
-
 ## [2.1.0] - 2026-06-04
 
 ### Added

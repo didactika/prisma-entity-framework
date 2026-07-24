@@ -270,6 +270,14 @@ export default class SearchResolver {
         const path = condition.field;
         if (typeof path !== "string" || path.trim() === "") return null;
 
+        // A path that dives into a JSON column becomes a Prisma JSON filter instead of nesting.
+        const json = modelInfo ? this.splitJsonPath(path, modelInfo) : null;
+        if (json) {
+            const jsonOperator = this.buildJsonOperator(condition, json.segments);
+            if (!jsonOperator) return null;
+            return this.expandPath(json.column, jsonOperator, modelInfo, condition.relation ?? "some");
+        }
+
         const fieldInfo = modelInfo ? this.getFieldInfoForPath(path, modelInfo) : null;
         const operator = this.buildOperator(condition, fieldInfo);
         if (!operator) return null;
@@ -288,6 +296,55 @@ export default class SearchResolver {
         }
 
         return constraint;
+    }
+
+    /**
+     * Splits a dotted path where it enters a JSON column
+     *
+     * @param path - The condition's `field`, e.g. `'author.metadata.dimensions.width'`
+     * @param modelInfo - Model information for the root of the path
+     * @returns `{ column, segments }` when a `Json` field is crossed with a path remaining after
+     * it — `column` is the path to the JSON column (relations included), `segments` the path
+     * inside the JSON value with numeric-looking parts coerced to array indices. Null otherwise.
+     * @private
+     *
+     * @remarks
+     * A `Json` field with nothing after it is not a JSON *attribute* query — it is a plain
+     * whole-column condition — so it returns null and the normal path applies.
+     */
+    private static splitJsonPath(
+        path: string,
+        modelInfo: any
+    ): { column: string; segments: (string | number)[] } | null {
+        const keys = path.split(".");
+        let current = modelInfo;
+
+        for (let index = 0; index < keys.length; index++) {
+            const field = current?.fields?.find((f: any) => f.name === keys[index]);
+            if (!field) return null;
+
+            if (field.type === "Json") {
+                const segments = keys.slice(index + 1);
+                if (segments.length === 0) return null;
+
+                return {
+                    column: keys.slice(0, index + 1).join("."),
+                    segments: segments.map(segment => this.toPathSegment(segment))
+                };
+            }
+
+            if (field.kind !== "object") return null;
+
+            current = this.getRelatedModelInfo(keys[index], current);
+            if (!current) return null;
+        }
+
+        return null;
+    }
+
+    /** Coerces a numeric-looking JSON path segment to an array index */
+    private static toPathSegment(segment: string): string | number {
+        return /^\d+$/.test(segment) ? Number(segment) : segment;
     }
 
     /**
@@ -388,10 +445,100 @@ export default class SearchResolver {
     }
 
     /**
-     * Builds a range operator from `between`, `gte` and/or `lte`
+     * Builds a Prisma JSON filter for a path that dives into a JSON column
+     *
+     * @returns The `{ path, <json operator> }` object, or null when the operator is unusable
+     * or has no JSON equivalent
+     * @private
+     *
+     * @param condition - The condition being resolved
+     * @param segments - The path inside the JSON value, from {@link splitJsonPath}
+     *
+     * @remarks
+     * The path format follows the provider: PostgreSQL takes an array of segments, MySQL a
+     * `$.a.b` JSONPath string. The string operators map to Prisma's `string_contains` family and
+     * `hasEvery` to `array_contains` (does the JSON array hold all of these values) — all of which
+     * only PostgreSQL implements. MySQL supports `equals` alone. `in` / `notIn` / `hasSome` /
+     * `isNull` have no JSON equivalent and return null so the condition is pruned.
+     */
+    private static buildJsonOperator(
+        condition: LooseCondition,
+        segments: (string | number)[]
+    ): Record<string, any> | null {
+        const path = this.formatJsonPath(segments);
+        const insensitive = (condition.insensitive ?? isCaseInsensitiveSearch()) && this.providerSupportsCaseMode();
+        const mode = insensitive ? { mode: "insensitive" } : {};
+
+        if ("equals" in condition) {
+            if (condition.equals === null) return { path, equals: null };
+            return isValidValue(condition.equals) ? { path, equals: condition.equals } : null;
+        }
+
+        if ("like" in condition) {
+            return isValidValue(condition.like) ? { path, string_contains: condition.like, ...mode } : null;
+        }
+
+        if ("startsWith" in condition) {
+            return isValidValue(condition.startsWith) ? { path, string_starts_with: condition.startsWith, ...mode } : null;
+        }
+
+        if ("endsWith" in condition) {
+            return isValidValue(condition.endsWith) ? { path, string_ends_with: condition.endsWith, ...mode } : null;
+        }
+
+        // A JSON array holding all the listed values
+        if ("hasEvery" in condition) {
+            return isValidValue(condition.hasEvery) ? { path, array_contains: [...condition.hasEvery!] } : null;
+        }
+
+        const range = this.rangeBounds(condition);
+        if (range) return { path, ...range };
+
+        // No JSON equivalent for in / notIn / hasSome / isNull
+        return null;
+    }
+
+    /**
+     * Formats a JSON path for the configured provider
+     *
+     * @remarks
+     * PostgreSQL wants an array of **string** segments — an array index is a numeric string like
+     * `'0'`, and Prisma rejects an actual number here. MySQL wants a `$.a.b` JSONPath string with
+     * array indices rendered as `[n]`. Without a configured provider the string-array form is
+     * used, which is what PostgreSQL and MongoDB expect.
      * @private
      */
-    private static buildRangeOperator(condition: LooseCondition, fieldInfo?: any): Record<string, any> | null {
+    private static formatJsonPath(segments: readonly (string | number)[]): string | string[] {
+        if (this.currentProvider() === "mysql") {
+            return segments.reduce<string>((acc, segment) => {
+                return typeof segment === "number" ? `${acc}[${segment}]` : `${acc}.${segment}`;
+            }, "$");
+        }
+
+        return segments.map(segment => String(segment));
+    }
+
+    /**
+     * The configured database provider, or null when it cannot be determined
+     * @private
+     */
+    private static currentProvider(): string | null {
+        if (!isPrismaConfigured()) return null;
+
+        try {
+            return getDatabaseProviderCached();
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Extracts the gte/lte bounds of a condition from `between`, `gte` and/or `lte`
+     *
+     * @returns The bounds object, or null when neither bound is present
+     * @private
+     */
+    private static rangeBounds(condition: LooseCondition): Record<string, any> | null {
         const range: Record<string, any> = {};
 
         if (Array.isArray(condition.between) && condition.between.length === 2) {
@@ -403,7 +550,16 @@ export default class SearchResolver {
             if (condition.lte !== undefined && condition.lte !== null) range.lte = condition.lte;
         }
 
-        if (Object.keys(range).length === 0) return null;
+        return Object.keys(range).length === 0 ? null : range;
+    }
+
+    /**
+     * Builds a range operator from `between`, `gte` and/or `lte`
+     * @private
+     */
+    private static buildRangeOperator(condition: LooseCondition, fieldInfo?: any): Record<string, any> | null {
+        const range = this.rangeBounds(condition);
+        if (!range) return null;
 
         // R10 - an order comparison on a nullable column excludes NULL rows explicitly,
         // unless the caller asked for them back with orNull
@@ -507,7 +663,13 @@ export default class SearchResolver {
     }
 
     /**
-     * Resolves the model information for the relation a field points at
+     * Resolves the field metadata for the model or embedded type a field points at
+     *
+     * @remarks
+     * Relations point at models; MongoDB embedded/composite fields point at *types*. Prisma keeps
+     * those in separate maps (`models` and `types`) of the runtime data model, so both are checked.
+     * Without this, an embedded subfield's nullability could not be read, and R10 would add a
+     * spurious `not: null` that MongoDB rejects on a required subfield.
      * @private
      */
     private static getRelatedModelInfo(fieldName: string, modelInfo: any): any | null {
@@ -515,8 +677,10 @@ export default class SearchResolver {
         if (!field || field.kind !== "object") return null;
 
         try {
-            const prisma = getPrismaInstance() as any;
-            return prisma?._runtimeDataModel?.models?.[field.type] ?? null;
+            const runtimeDataModel = (getPrismaInstance() as any)?._runtimeDataModel;
+            return runtimeDataModel?.models?.[field.type]
+                ?? runtimeDataModel?.types?.[field.type]
+                ?? null;
         } catch {
             return null;
         }
