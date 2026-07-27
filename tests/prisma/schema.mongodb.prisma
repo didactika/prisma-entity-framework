@@ -69,6 +69,19 @@ type ProductSpec {
   value String
 }
 
+// Nested composite: a single embedded document (Program) holding a list of
+// embedded documents — for testing two-level embedded paths. Named
+// ProgramSubject to avoid colliding with the `model Subject` used elsewhere.
+type ProgramSubject {
+  shortname String
+  name      String
+}
+
+type Program {
+  code     String
+  subjects ProgramSubject[]
+}
+
 model Product {
   id          String       @id @default(auto()) @map("_id") @db.ObjectId
   name        String
@@ -80,6 +93,7 @@ model Product {
   settings    Json?
   dimensions  Dimensions?   // single embedded document
   specs       ProductSpec[] // list of embedded documents
+  program     Program?      // single embedded holding an embedded array
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
