@@ -22,8 +22,13 @@ jobs:
   # already passed this same matrix, so it is skipped there.
   ci:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    # Must grant everything any job in ci.yml could request, including its
+    # release job's contents:write/actions:write — GitHub validates that at
+    # call time regardless of that job's own `if` (it never actually runs
+    # here, since a tag push isn't github.event_name == 'push' on a branch).
     permissions:
-      contents: read
+      contents: write
+      actions: write
     uses: ./.github/workflows/ci.yml
 
   validate:
@@ -185,6 +190,18 @@ jobs:
             npm dist-tag add "$PKG@$HIGHEST" latest
           fi
 
+      - name: Extract CHANGELOG section for this version
+        if: needs.validate.outputs.should_publish == 'true'
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md | sed -e '1{/^$/d}' > /tmp/release-notes.md
+          echo "Extracted $(wc -l < /tmp/release-notes.md) line(s) from CHANGELOG.md for $VERSION"
+
       - name: Create GitHub Release
         if: needs.validate.outputs.should_publish == 'true'
         env:
@@ -193,7 +210,14 @@ jobs:
         run: |
           if gh release view "$VERSION_TAG" >/dev/null 2>&1; then
             echo "GitHub Release $VERSION_TAG already exists"
+          elif [ -s /tmp/release-notes.md ]; then
+            # CHANGELOG.md has a matching "## [x.y.z]" section — use it verbatim as the release body.
+            gh release create "$VERSION_TAG" \
+              --verify-tag \
+              --title "$VERSION_TAG" \
+              --notes-file /tmp/release-notes.md
           else
+            # No matching section (shouldn't happen — validate already requires one) — fall back.
             gh release create "$VERSION_TAG" \
               --verify-tag \
               --title "$VERSION_TAG" \
