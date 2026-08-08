@@ -32,9 +32,9 @@
     "prisma:mysql": "prisma generate --schema=tests/prisma/schema.mysql.prisma && prisma db push --schema=tests/prisma/schema.mysql.prisma --skip-generate",
     "prisma:postgresql": "prisma generate --schema=tests/prisma/schema.postgresql.prisma && prisma db push --schema=tests/prisma/schema.postgresql.prisma --skip-generate",
     "prisma:mongodb": "prisma generate --schema=tests/prisma/schema.mongodb.prisma && prisma db push --schema=tests/prisma/schema.mongodb.prisma --skip-generate",
-    "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down",
-    "docker:clean": "docker-compose down -v"
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:clean": "docker compose down -v"
   },
   "keywords": [
     "prisma",

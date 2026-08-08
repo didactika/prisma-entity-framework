@@ -54,11 +54,11 @@ function Invoke-Cleanup {
         # Disconnect any active connections
         if ($Database -ne 'sqlite') {
             Write-Log "Stopping $Database container..." -Level Info
-            docker-compose stop $Database 2>&1 | Out-Null
+            docker compose stop $Database 2>&1 | Out-Null
             
             if ($Force) {
                 Write-Log "Removing $Database container..." -Level Info
-                docker-compose rm -f $Database 2>&1 | Out-Null
+                docker compose rm -f $Database 2>&1 | Out-Null
             }
         }
         
@@ -98,7 +98,7 @@ function Wait-ForDatabase {
         try {
             switch ($Database) {
                 'mysql' {
-                    $result = docker-compose exec -T mysql mysqladmin ping -h localhost -u root -pprisma_test_password 2>&1
+                    $result = docker compose exec -T mysql mysqladmin ping -h localhost -u root -pprisma_test_password 2>&1
                     # MySQL outputs warning to stderr but succeeds with exit code 0
                     # Check both exit code and output for "mysqld is alive"
                     if ($LASTEXITCODE -eq 0 -and $result -match "mysqld is alive") {
@@ -108,7 +108,7 @@ function Wait-ForDatabase {
                     }
                 }
                 'postgresql' {
-                    $result = docker-compose exec -T postgresql pg_isready -U prisma_test 2>&1
+                    $result = docker compose exec -T postgresql pg_isready -U prisma_test 2>&1
                     if ($LASTEXITCODE -eq 0) {
                         $ready = $true
                     } else {
@@ -116,7 +116,7 @@ function Wait-ForDatabase {
                     }
                 }
                 'mongodb' {
-                    $result = docker-compose exec -T mongodb mongosh --quiet --eval "db.adminCommand('ping').ok" 2>&1
+                    $result = docker compose exec -T mongodb mongosh --quiet --eval "db.adminCommand('ping').ok" 2>&1
                     if ($LASTEXITCODE -eq 0 -and $result -match "1") {
                         $ready = $true
                     } else {
@@ -177,11 +177,11 @@ try {
                 $script:containerStarted = $false  # Don't stop it in cleanup
                 $script:cleanupRequired = $false
             } else {
-                # Temporarily allow stderr output from docker-compose without throwing
+                # Temporarily allow stderr output from docker compose without throwing
                 # Docker writes progress messages (Creating, Pulling) to stderr which are not errors
                 $prevErrorAction = $ErrorActionPreference
                 $ErrorActionPreference = "Continue"
-                $dockerOutput = docker-compose up -d $Database 2>&1
+                $dockerOutput = docker compose up -d $Database 2>&1
                 $ErrorActionPreference = $prevErrorAction
                 if ($LASTEXITCODE -ne 0) {
                     throw "Failed to start $Database container (exit code: $LASTEXITCODE). Output: $dockerOutput"
@@ -227,7 +227,7 @@ try {
                 # Try to get replica set status
                 $prevErrorAction = $ErrorActionPreference
                 $ErrorActionPreference = "Continue"
-                $rsStatus = docker-compose exec -T mongodb mongosh --quiet --eval "try { rs.status().ok } catch(e) { 0 }" 2>&1
+                $rsStatus = docker compose exec -T mongodb mongosh --quiet --eval "try { rs.status().ok } catch(e) { 0 }" 2>&1
                 $ErrorActionPreference = $prevErrorAction
                 
                 # Check if we got a valid response indicating replica set is initialized
@@ -238,7 +238,7 @@ try {
                     
                     # Initialize replica set
                     $ErrorActionPreference = "Continue"
-                    $initResult = docker-compose exec -T mongodb mongosh --quiet --eval "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]})" 2>&1
+                    $initResult = docker compose exec -T mongodb mongosh --quiet --eval "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]})" 2>&1
                     $initExitCode = $LASTEXITCODE
                     $ErrorActionPreference = $prevErrorAction
                     
@@ -256,7 +256,7 @@ try {
                             $waited++
                             
                             $ErrorActionPreference = "Continue"
-                            $primaryCheck = docker-compose exec -T mongodb mongosh --quiet --eval "db.hello().isWritablePrimary" 2>&1
+                            $primaryCheck = docker compose exec -T mongodb mongosh --quiet --eval "db.hello().isWritablePrimary" 2>&1
                             $ErrorActionPreference = $prevErrorAction
                             
                             if ($primaryCheck -match "true") {
