@@ -208,9 +208,11 @@ try {
         switch ($Database) {
             'mysql' {
                 $env:DATABASE_URL = "mysql://prisma_test:prisma_test_password@localhost:3311/prisma_test"
+                $env:DATABASE_URL_MYSQL = $env:DATABASE_URL
             }
             'postgresql' {
                 $env:DATABASE_URL = "postgresql://prisma_test:prisma_test_password@localhost:5433/prisma_test"
+                $env:DATABASE_URL_POSTGRESQL = $env:DATABASE_URL
             }
             'mongodb' {
                 # Use directConnection without replicaSet for initialization
