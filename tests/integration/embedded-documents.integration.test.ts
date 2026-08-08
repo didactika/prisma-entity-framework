@@ -21,6 +21,7 @@ interface IProduct {
   sku: string;
   dimensions?: { width: number; height: number; label?: string | null } | null;
   specs?: Array<{ key: string; value: string }>;
+  program?: { code: string; subjects: Array<{ shortname: string; name: string }> } | null;
 }
 
 class Product extends BaseEntity<IProduct> implements IProduct {
@@ -32,6 +33,7 @@ class Product extends BaseEntity<IProduct> implements IProduct {
   @Property() declare sku: IProduct['sku'];
   @Property() declare dimensions: IProduct['dimensions'];
   @Property() declare specs: IProduct['specs'];
+  @Property() declare program: IProduct['program'];
 
   constructor(data?: Partial<IProduct>) {
     super(data);
@@ -207,6 +209,122 @@ describe('MongoDB embedded documents - Integration Tests', () => {
       expect(found).toHaveLength(1);
       expect(found[0].dimensions).toMatchObject({ width: 1, height: 2 });
       expect(found[0].specs).toEqual([{ key: 'ram', value: '32GB' }]);
+    });
+  });
+
+  describe('updating embedded documents', () => {
+    it('should replace a single embedded document via instance update()', async () => {
+      if (!runsHere) return;
+
+      const created = await new Product({
+        name: 'Editar', sku: 'SKU-EDIT',
+        dimensions: { width: 5, height: 5, label: 'orig' }
+      }).create();
+
+      const entity = new Product({ ...created, dimensions: { width: 99, height: 88, label: 'nuevo' } });
+      await entity.update();
+
+      const found = await Product.findByFilter({ sku: 'SKU-EDIT' }, {}) as IProduct[];
+      expect(found).toHaveLength(1);
+      expect(found[0].dimensions).toMatchObject({ width: 99, height: 88, label: 'nuevo' });
+    });
+
+    it('should replace a list of embedded documents via instance update()', async () => {
+      if (!runsHere) return;
+
+      const created = await new Product({
+        name: 'EditarSpecs', sku: 'SKU-EDIT-SPECS',
+        specs: [{ key: 'cpu', value: 'old' }]
+      }).create();
+
+      const entity = new Product({ ...created, specs: [{ key: 'cpu', value: 'new' }, { key: 'ram', value: '64GB' }] });
+      await entity.update();
+
+      const found = await Product.findByFilter({ sku: 'SKU-EDIT-SPECS' }, {}) as IProduct[];
+      expect(found[0].specs).toHaveLength(2);
+      expect(found[0].specs?.map(s => s.value).sort()).toEqual(['64GB', 'new']);
+    });
+
+    it('should set an embedded document via updateByFilter', async () => {
+      if (!runsHere) return;
+
+      await new Product({
+        name: 'PorFiltro', sku: 'SKU-BYFILTER',
+        dimensions: { width: 1, height: 1, label: 'a' }
+      }).create();
+
+      const count = await Product.updateByFilter(
+        { sku: 'SKU-BYFILTER' },
+        { dimensions: { width: 7, height: 7, label: 'b' } } as any
+      );
+
+      expect(count).toBe(1);
+
+      const found = await Product.findByFilter({ sku: 'SKU-BYFILTER' }, {}) as IProduct[];
+      expect(found[0].dimensions).toMatchObject({ width: 7, height: 7, label: 'b' });
+    });
+  });
+
+  /**
+   * Two levels of embedding: a single embedded document (program) holding an array of embedded
+   * documents (subjects). This is the user's exact case — filtering
+   * `program.subjects.shortname IN [...]` — resolving to
+   * `{ program: { is: { subjects: { some: { shortname: { in: [...] } } } } } }`.
+   */
+  describe('nested embedded documents (embedded → embedded array → field)', () => {
+    beforeEach(async () => {
+      if (!runsHere) return;
+      await db.clear();
+      await (prisma as any).product.createMany({
+        data: [
+          { name: 'CursoA', sku: 'C-A', program: { code: 'P1', subjects: [{ shortname: 'MAT', name: 'Matematica' }, { shortname: 'FIS', name: 'Fisica' }] } },
+          { name: 'CursoB', sku: 'C-B', program: { code: 'P2', subjects: [{ shortname: 'QUI', name: 'Quimica' }] } },
+          { name: 'CursoC', sku: 'C-C', program: { code: 'P3', subjects: [{ shortname: 'BIO', name: 'Biologia' }] } }
+        ]
+      });
+    });
+
+    it('should filter by a subfield of an embedded array inside an embedded document (in)', async () => {
+      if (!runsHere) return;
+
+      const products = await Product.findByFilter({}, {
+        search: { field: 'program.subjects.shortname', in: ['MAT', 'QUI'] }
+      }) as IProduct[];
+
+      // CursoA has MAT, CursoB has QUI, CursoC has neither
+      expect(products.map(p => p.name).sort()).toEqual(['CursoA', 'CursoB']);
+    });
+
+    it('should support equals on the nested path', async () => {
+      if (!runsHere) return;
+
+      const products = await Product.findByFilter({}, {
+        search: { field: 'program.subjects.shortname', equals: 'FIS' }
+      }) as IProduct[];
+
+      expect(products.map(p => p.name)).toEqual(['CursoA']);
+    });
+
+    it('should honour the every quantifier across the nested array', async () => {
+      if (!runsHere) return;
+
+      // every subject of the program starts with 'MAT' or 'FIS'? only CursoA has all matching 'I'? use a real 'every'
+      const products = await Product.findByFilter({}, {
+        search: { field: 'program.subjects.shortname', in: ['QUI'], relation: 'every' }
+      }) as IProduct[];
+
+      // CursoB's only subject is QUI → every matches; CursoA has MAT/FIS → no
+      expect(products.map(p => p.name)).toEqual(['CursoB']);
+    });
+
+    it('should combine the nested embedded filter with a scalar field', async () => {
+      if (!runsHere) return;
+
+      const products = await Product.findByFilter({ sku: 'C-A' }, {
+        search: { field: 'program.subjects.shortname', in: ['MAT'] }
+      }) as IProduct[];
+
+      expect(products.map(p => p.name)).toEqual(['CursoA']);
     });
   });
 
