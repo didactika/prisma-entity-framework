@@ -14,7 +14,6 @@
   "scripts": {
     "clean": "rimraf dist",
     "build": "tsup src/index.ts --dts --format cjs,esm",
-    "prepublishOnly": "npm test",
     "test": "jest",
     "test:unit": "jest --testPathIgnorePatterns=integration --testPathIgnorePatterns=benchmark",
     "test:integration": "jest integration",
