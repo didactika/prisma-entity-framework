@@ -16,7 +16,7 @@
     "build": "tsup src/index.ts --dts --format cjs,esm",
     "prepublishOnly": "npm test",
     "test": "jest",
-    "test:unit": "jest --testPathIgnorePatterns=integration",
+    "test:unit": "jest --testPathIgnorePatterns=integration --testPathIgnorePatterns=benchmark",
     "test:integration": "jest integration",
     "test:all": "npm run test:unit && npm run test:integration",
     "test:watch": "jest --watch",
