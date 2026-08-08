@@ -338,7 +338,7 @@ describe('upsert-utils', () => {
 
             expect(sql).toContain('<=>');
             expect(sql).toContain('IF(');
-            expect(sql).toContain('NOW()');
+            expect(sql).toContain('NOW(3)');
         });
 
         it('should place updatedAt IF condition before other SET columns', () => {
