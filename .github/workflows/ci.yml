@@ -52,6 +52,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+
+      # Every non-sqlite schema generates its client into its own output
+      # folder (client-mysql, client-postgresql, client-mongodb), never into
+      # the default @prisma/client location the test files import their
+      # PrismaClient *type* from. A local working directory usually already
+      # has that default location populated from a previous run; a fresh CI
+      # checkout doesn't, and ts-jest then can't resolve types through it,
+      # cascading into implicit-any errors. Generate it unconditionally first.
+      - run: npm run prisma:test
+
       - name: Run ${{ matrix.database }} integration suite
         run: pwsh -File ./scripts/test-database.ps1 -Database ${{ matrix.database }}
 

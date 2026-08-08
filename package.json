@@ -1,6 +1,6 @@
 {
   "name": "prisma-entity-framework",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "TypeScript Entity Framework for Prisma ORM with Active Record pattern, fluent query builder, relation graphs, batch operations, advanced CRUD, search filters, and pagination utilities.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -32,9 +32,9 @@
     "prisma:mysql": "prisma generate --schema=tests/prisma/schema.mysql.prisma && prisma db push --schema=tests/prisma/schema.mysql.prisma --skip-generate",
     "prisma:postgresql": "prisma generate --schema=tests/prisma/schema.postgresql.prisma && prisma db push --schema=tests/prisma/schema.postgresql.prisma --skip-generate",
     "prisma:mongodb": "prisma generate --schema=tests/prisma/schema.mongodb.prisma && prisma db push --schema=tests/prisma/schema.mongodb.prisma --skip-generate",
-    "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down",
-    "docker:clean": "docker-compose down -v"
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:clean": "docker compose down -v"
   },
   "keywords": [
     "prisma",

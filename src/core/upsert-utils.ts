@@ -162,7 +162,7 @@ function getInsertableColumns(
  */
 function nowExpression(provider: DatabaseProvider): string {
     switch (provider) {
-        case 'mysql': return 'NOW()';
+        case 'mysql': return 'NOW(3)';
         case 'postgresql': return 'NOW()';
         case 'sqlite': return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
         case 'sqlserver': return 'GETDATE()';
@@ -349,9 +349,9 @@ export function buildMySQLUpsert(
             const nullSafeChecks = comparable
                 .map(c => `${q(c.dbName, prisma)} <=> VALUES(${q(c.dbName, prisma)})`)
                 .join(' AND ');
-            setClauses.push(`${qCol} = IF(${nullSafeChecks}, ${qCol}, NOW())`);
+            setClauses.push(`${qCol} = IF(${nullSafeChecks}, ${qCol}, NOW(3))`);
         } else {
-            setClauses.push(`${qCol} = NOW()`);
+            setClauses.push(`${qCol} = NOW(3)`);
         }
     }
     for (const col of updatable) {

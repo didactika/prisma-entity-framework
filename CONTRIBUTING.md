@@ -25,10 +25,10 @@ Open your pull request against the branch that matches the version you're fixing
 protected: at least one maintainer approval and a passing CI run are required before
 merge, and history cannot be rewritten or force-pushed.
 
-Name your own working branch after what it does, using the same git-flow-style prefix
-as its commits (see below): `feature/upsert-by-filter`, `fix/mysql-json-path`,
-`hotfix/mongo-replica-timeout`, `docs/testing-guide`, `chore/bump-prisma`. It gets
-deleted once merged; the long-lived branches are only `v3.x` and `v2.x`.
+Name your own working branch after what it does, git-flow-style: `feature/upsert-by-filter`,
+`fix/mysql-json-path`, `hotfix/mongo-replica-timeout`, `docs/testing-guide`,
+`chore/bump-prisma`. It gets deleted once merged; the long-lived branches are only
+`v3.x` and `v2.x`.
 
 ## Code style
 
@@ -39,20 +39,17 @@ falling back to `any`.
 
 ## Commit messages
 
-This repo follows a git-flow-style prefix, not [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) —
-the type in a commit message matches the type in the branch name it came from:
-`feature: add updateByFilter`, `fix: mongo replica set timeout`, `hotfix: ...`,
-`docs: ...`, `chore(deps): ...`, `chore(deps-dev): ...` (the last two are what
-Dependabot itself uses, see [`.github/dependabot.yml`](.github/dependabot.yml)). It
-isn't enforced by tooling, but GitHub Releases are generated from merged pull requests,
-so a clear, correctly-typed title makes that generated changelog useful instead of noise.
+Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
+`feat: add updateByFilter`, `fix: mongo replica set timeout`, `docs: ...`,
+`chore(deps): ...`. GitHub Releases are generated from merged pull requests, so a
+correctly-typed, scoped title is what makes that generated changelog readable.
 
 ## Testing
 
 - `npm test` runs the default (SQLite) unit + integration suite.
 - `npm run test:unit` / `npm run test:integration` run one or the other.
 - `npm run test:mysql`, `test:postgresql`, `test:mongodb` run the integration suite
-  against that database via Docker Compose (`docker-compose up -d <service>` first, or
+  against that database via Docker Compose (`docker compose up -d <service>` first, or
   let the script start it for you).
 - `npm run test:all-databases` runs the full matrix.
 
