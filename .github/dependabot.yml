@@ -1,0 +1,57 @@
+version: 2
+
+# Update PRs are maintainer/bot-only — see the "Dependency and GitHub Actions
+# updates" section in CONTRIBUTING.md. Keep the 7-day cooldown unless a
+# critical vulnerability needs a maintainer-led manual update instead.
+#
+# Only the default branch (v3.x) is watched here. v2.x is a maintenance-only
+# line: a security backport there is a deliberate, maintainer-opened PR, not
+# something a bot should propose on its own schedule.
+updates:
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - '*'
+    commit-message:
+      prefix: 'chore(ci)'
+    labels:
+      - 'commit::chore'
+      - 'type::automated-pr'
+      - 'ecosystem::github-actions'
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    groups:
+      production-dependencies:
+        dependency-type: 'production'
+        update-types:
+          - 'minor'
+          - 'patch'
+      development-dependencies:
+        dependency-type: 'development'
+        update-types:
+          - 'minor'
+          - 'patch'
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+    commit-message:
+      prefix: 'chore(deps)'
+      prefix-development: 'chore(deps-dev)'
+    labels:
+      - 'commit::chore'
+      - 'type::automated-pr'
+      - 'ecosystem::npm'
+    cooldown:
+      default-days: 7
