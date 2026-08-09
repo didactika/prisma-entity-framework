@@ -209,9 +209,12 @@ jobs:
           fi
 
       # So a maintenance release on an old major is still reachable by name —
-      # `npm install prisma-entity-framework@v2.x` always resolves to the
-      # newest 2.x patch, independent of whatever "latest" points to.
-      - name: Tag this version under its major line (vN.x)
+      # `npm install prisma-entity-framework@v2x` always resolves to the
+      # newest 2.x patch, independent of whatever "latest" points to. No dot
+      # in the tag name on purpose: npm's own arg parsing treats a bare
+      # "v2.x" as a semver range (>=2.0.0 <3.0.0) before it ever considers
+      # dist-tags, which would silently bypass this tag rather than use it.
+      - name: Tag this version under its major line (vNx)
         if: needs.validate.outputs.should_publish == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -219,7 +222,7 @@ jobs:
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
           export MAJOR="${VERSION%%.*}"
-          MAJOR_TAG="v${MAJOR}.x"
+          MAJOR_TAG="v${MAJOR}x"
 
           HIGHEST_IN_MAJOR=$(npm view "$PKG" versions --json | node -e "
             const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
