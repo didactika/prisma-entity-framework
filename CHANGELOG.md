@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.3] - 2026-08-09
+
+Administrative release, no code changes from 3.1.2. The `v3.1.2` git tag was deleted and
+could not be recreated (GitHub rejects re-creating a tag name that once existed, for
+either a personal push or the release automation) — republishing under a fresh version
+was simpler than fighting that. `3.1.2` stays on npm; it has no matching git tag or
+GitHub Release, `3.1.3` is the one that does.
+
 ## [3.1.2] - 2026-08-09
 
 ### Changed

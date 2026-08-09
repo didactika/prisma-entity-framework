@@ -132,9 +132,9 @@ jobs:
             console.log('Tarball contents ok:',files.length,'files,',p.size,'bytes');
           "
 
-  # Publish with the npm access token. Trusted (OIDC) publishing is not set
-  # up for this package yet — do not switch this to `--provenance` /
-  # `id-token: write` without setting that up first.
+  # Publish via npm trusted publishing (OIDC) — no long-lived npm token
+  # stored in the repo. Requires the trusted publisher already registered on
+  # npmjs.com for this exact package/org/repo/workflow/environment.
   publish:
     name: publish to npm
     if: always() && needs.validate.result == 'success'
@@ -145,9 +145,10 @@ jobs:
     # to add required reviewers later (Settings -> Environments -> npm).
     environment:
       name: npm
-      url: https://www.npmjs.com/package/prisma-entity-framework/v/${{ needs.validate.outputs.version }}
+      url: https://www.npmjs.com/package/${{ needs.validate.outputs.name }}/v/${{ needs.validate.outputs.version }}
     permissions:
-      contents: write
+      contents: write # to create the GitHub Release after a successful publish
+      id-token: write # required for npm trusted publishing (OIDC)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -155,15 +156,24 @@ jobs:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
 
+      # Trusted publishing requires npm >= 11.5.1. The npm bundled with the
+      # runner's Node install can be older than that — it will happily sign
+      # provenance but cannot exchange GitHub's OIDC token for a registry
+      # credential, so it must be upgraded explicitly before publishing.
+      - name: Install npm with trusted publishing support
+        run: |
+          npm install --global npm@^11.5.1
+          npm --version
+
       - run: npm ci
       - run: npx prisma generate --schema=tests/prisma/schema.test.prisma
       - run: npm run build
 
+      # Authentication is exclusively OIDC trusted publishing. Do not add a
+      # NODE_AUTH_TOKEN / NPM_TOKEN env var back here.
       - name: Publish
         if: needs.validate.outputs.should_publish == 'true'
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
 
       - name: Dry run
         if: needs.validate.outputs.should_publish == 'false'
@@ -174,11 +184,16 @@ jobs:
       # backport) publishes after a higher one (v3.x) already exists on the
       # registry — "latest" must always be the highest semver published, not
       # the most recently published one. Compare and correct it explicitly.
+      # VERIFY: `npm publish --provenance` authenticates via a short-lived
+      # credential exchanged from the OIDC id-token, scoped to that one
+      # publish call. It is NOT confirmed whether that credential is also
+      # honored by `npm dist-tag add` in this later, separate step. If this
+      # 401s, uncomment NODE_AUTH_TOKEN below — the secret is still there.
       - name: Point npm 'latest' at the highest published semver
         if: needs.validate.outputs.should_publish == 'true'
         id: npm-latest
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}  # VERIFY: uncomment if this 401s
           PKG: ${{ needs.validate.outputs.name }}
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
@@ -209,15 +224,17 @@ jobs:
           fi
 
       # So a maintenance release on an old major is still reachable by name —
-      # `npm install prisma-entity-framework@v2x` always resolves to the
+      # `npm install @didactika/prisma-entity@v2x` always resolves to the
       # newest 2.x patch, independent of whatever "latest" points to. No dot
       # in the tag name on purpose: npm's own arg parsing treats a bare
       # "v2.x" as a semver range (>=2.0.0 <3.0.0) before it ever considers
       # dist-tags, which would silently bypass this tag rather than use it.
-      - name: Tag this version under its major line (vNx)
+      #
+      # VERIFY: same open question as the step above — see the note there.
+      - name: Point 'vNx' at the highest published version in that major
         if: needs.validate.outputs.should_publish == 'true'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}  # VERIFY: uncomment if needed, see above
           PKG: ${{ needs.validate.outputs.name }}
           VERSION: ${{ needs.validate.outputs.version }}
         run: |
@@ -234,11 +251,12 @@ jobs:
             };
             console.log(inMajor.sort(cmp).pop());
           ")
+          CURRENT=$(npm view "$PKG" "dist-tags.$MAJOR_TAG" 2>/dev/null || true)
 
-          echo "Highest published $MAJOR_TAG release: $HIGHEST_IN_MAJOR"
-          if [ "$VERSION" = "$HIGHEST_IN_MAJOR" ]; then
-            echo "Tagging $PKG@$VERSION as $MAJOR_TAG"
-            npm dist-tag add "$PKG@$VERSION" "$MAJOR_TAG"
+          echo "Highest published $MAJOR_TAG release: $HIGHEST_IN_MAJOR ($MAJOR_TAG currently: ${CURRENT:-unset})"
+          if [ "$HIGHEST_IN_MAJOR" != "$CURRENT" ]; then
+            echo "Correcting $MAJOR_TAG to $HIGHEST_IN_MAJOR"
+            npm dist-tag add "$PKG@$HIGHEST_IN_MAJOR" "$MAJOR_TAG"
           fi
 
       - name: Extract CHANGELOG section for this version
