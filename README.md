@@ -4,7 +4,7 @@
 
 A complete TypeScript framework that extends Prisma Client with the Active Record pattern, a declarative query builder, relation graph traversal, and high-performance batch operations.
 
-[![npm version](https://badge.fury.io/js/prisma-entity-framework.svg)](https://www.npmjs.com/package/prisma-entity-framework)
+[![npm version](https://img.shields.io/npm/v/%40didactika%2Fprisma-entity.svg?logo=npm)](https://www.npmjs.com/package/@didactika/prisma-entity)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ---
 
@@ -34,11 +34,11 @@ Prisma is a fantastic query builder, but it's not a traditional ORM. This framew
 ## 📦 Installation
 
 ```bash
-npm install prisma-entity-framework
+npm install @didactika/prisma-entity
 # or
-yarn add prisma-entity-framework
+yarn add @didactika/prisma-entity
 # or
-pnpm add prisma-entity-framework
+pnpm add @didactika/prisma-entity
 ```
 
 **Requirements:**
@@ -52,7 +52,7 @@ pnpm add prisma-entity-framework
 1.  **Configure Prisma Client (one-time setup)**
     ```typescript
     import { PrismaClient } from '@prisma/client';
-    import { configurePrisma } from 'prisma-entity-framework';
+    import { configurePrisma } from '@didactika/prisma-entity';
 
     const prisma = new PrismaClient();
     configurePrisma(prisma);
@@ -60,7 +60,7 @@ pnpm add prisma-entity-framework
 
 2.  **Define an Entity**
     ```typescript
-    import { BaseEntity, Property } from 'prisma-entity-framework';
+    import { BaseEntity, Property } from '@didactika/prisma-entity';
     import { User as PrismaUser } from '@prisma/client';
     import { prisma } from './prisma-client';
 
@@ -75,7 +75,7 @@ pnpm add prisma-entity-framework
 
 3.  **Use It!**
     ```typescript
-    import { anyOf } from 'prisma-entity-framework';
+    import { anyOf } from '@didactika/prisma-entity';
 
     // Create a new user with the Active Record pattern
     const user = new User({ name: "John Doe", email: "john.doe@example.com" });
@@ -141,7 +141,7 @@ pnpm add prisma-entity-framework
     ```
 -   🕸️ **Graph Traversal**: Analyze and navigate your data model with utilities for dependency sorting and pathfinding.
     ```typescript
-    import { ModelUtils } from 'prisma-entity-framework';
+    import { ModelUtils } from '@didactika/prisma-entity';
 
     const path = ModelUtils.findPathToParentModel('Comment', 'User'); // -> "post.author"
     ```
