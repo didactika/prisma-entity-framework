@@ -129,7 +129,26 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$VERSION_TAG" -m "Release $VERSION_TAG"
+
+          # Use this version's own CHANGELOG.md section as the annotated tag
+          # message when there is one, same extraction release.yml uses for
+          # the GitHub Release body, so the tag itself isn't just "Release vX.Y.Z".
+          VERSION="${VERSION_TAG#v}"
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md | sed -e '1{/^$/d}' > /tmp/tag-message.md
+
+          {
+            echo "Release $VERSION_TAG"
+            if [ -s /tmp/tag-message.md ]; then
+              echo
+              cat /tmp/tag-message.md
+            fi
+          } > /tmp/tag-message-final.md
+
+          git tag -a "$VERSION_TAG" -F /tmp/tag-message-final.md
           git push origin "$VERSION_TAG"
 
       - name: Start release workflow
