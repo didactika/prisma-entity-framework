@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ['v*.x']
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The test matrix only needs to run once per change, on the pull request
+  # (or on a manual tag push via release.yml's workflow_call). A push to
+  # v3.x/v2.x is always a merge of a PR that already passed this same gate,
+  # so it skips straight to tagging instead of re-running everything.
+  unit:
+    name: unit
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: file:./test.db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:test
+      - run: npm run prisma:test:push
+      - run: npm run build
+      - run: npm run test:unit
+
+  # One database provider per job, using the same scripts/test-database.ps1 a
+  # contributor runs locally (npm run test:mysql / test:postgresql / ...).
+  # pwsh ships on the ubuntu-latest runner, so it's invoked directly instead of
+  # through the Windows-only `powershell` binary the npm script wrapper uses.
+  integration:
+    name: integration · ${{ matrix.database }}
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, mysql, postgresql, mongodb]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # Every non-sqlite schema generates its client into its own output
+      # folder (client-mysql, client-postgresql, client-mongodb), never into
+      # the default @prisma/client location the test files import their
+      # PrismaClient *type* from. A local working directory usually already
+      # has that default location populated from a previous run; a fresh CI
+      # checkout doesn't, and ts-jest then can't resolve types through it,
+      # cascading into implicit-any errors. Generate it unconditionally first.
+      - run: npm run prisma:test
+
+      - name: Run ${{ matrix.database }} integration suite
+        run: pwsh -File ./scripts/test-database.ps1 -Database ${{ matrix.database }}
+
+  # Single required check the branch ruleset depends on. Skipped on push,
+  # same as the jobs it depends on.
+  verify:
+    name: verify
+    if: always() && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    needs: [unit, integration]
+    permissions:
+      contents: read
+    steps:
+      - run: echo "All test jobs passed."
+
+  # A tag pushed with GITHUB_TOKEN does not trigger another workflow automatically.
+  # A push to v3.x/v2.x is always an already-tested merge (verify is skipped
+  # here on purpose, see above), so this goes straight to tagging instead of
+  # re-running the suite. Create the missing version tag, then explicitly
+  # dispatch the release workflow on that tag. Matches vN.x for any maintained
+  # major (v3.x, v2.x, and whichever comes next) without edits here.
+  release:
+    name: tag and start release
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/heads/v') &&
+      (needs.verify.result == 'success' || needs.verify.result == 'skipped')
+    runs-on: ubuntu-latest
+    needs: verify
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read package version
+        id: package
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether the version tag exists
+        id: tag
+        env:
+          VERSION_TAG: ${{ steps.package.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION_TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create version tag
+        if: steps.tag.outputs.exists == 'false'
+        env:
+          VERSION_TAG: ${{ steps.package.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION_TAG" -m "Release $VERSION_TAG"
+          git push origin "$VERSION_TAG"
+
+      - name: Start release workflow
+        if: steps.tag.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_TAG: ${{ steps.package.outputs.tag }}
+        run: gh workflow run release.yml --ref "$VERSION_TAG" -f dry_run=false

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-08-09
+
+### Fixed
+
+- **MySQL raw upsert wrote `updatedAt` with second precision, not millisecond.** `buildMySQLUpsert`
+  and the shared `nowExpression` helper called MySQL's `NOW()` with no argument, which truncates to
+  whole seconds regardless of the column's own precision. Two updates to the same row within the same
+  second could produce an `updatedAt` that reads as *older* than the previous value. Both call sites
+  now use `NOW(3)` to match the millisecond precision Prisma already gives the column.
+
 ## [2.1.0] - 2026-06-04
 
 ### Added
