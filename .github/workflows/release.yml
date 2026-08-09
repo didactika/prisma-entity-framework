@@ -176,9 +176,11 @@ jobs:
       # the most recently published one. Compare and correct it explicitly.
       - name: Point npm 'latest' at the highest published semver
         if: needs.validate.outputs.should_publish == 'true'
+        id: npm-latest
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           PKG: ${{ needs.validate.outputs.name }}
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
           HIGHEST=$(npm view "$PKG" versions --json | node -e "
             const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
@@ -194,6 +196,46 @@ jobs:
           if [ "$HIGHEST" != "$CURRENT_LATEST" ]; then
             echo "Correcting 'latest' to $HIGHEST"
             npm dist-tag add "$PKG@$HIGHEST" latest
+          fi
+
+          # Same highest-semver check drives whether *this* run's GitHub
+          # Release gets marked "Latest" below — gh release create defaults
+          # to most-recently-created, which is wrong the moment an older
+          # branch (v2.x) publishes after a newer one (v3.x) already exists.
+          if [ "$VERSION" = "$HIGHEST" ]; then
+            echo "is_highest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_highest=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # So a maintenance release on an old major is still reachable by name —
+      # `npm install prisma-entity-framework@v2.x` always resolves to the
+      # newest 2.x patch, independent of whatever "latest" points to.
+      - name: Tag this version under its major line (vN.x)
+        if: needs.validate.outputs.should_publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PKG: ${{ needs.validate.outputs.name }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          export MAJOR="${VERSION%%.*}"
+          MAJOR_TAG="v${MAJOR}.x"
+
+          HIGHEST_IN_MAJOR=$(npm view "$PKG" versions --json | node -e "
+            const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            const inMajor = data.filter(v => v.split('.')[0] === process.env.MAJOR);
+            const cmp = (a, b) => {
+              const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+              for (let i = 0; i < 3; i++) { if (pa[i] !== pb[i]) return pa[i] - pb[i]; }
+              return 0;
+            };
+            console.log(inMajor.sort(cmp).pop());
+          ")
+
+          echo "Highest published $MAJOR_TAG release: $HIGHEST_IN_MAJOR"
+          if [ "$VERSION" = "$HIGHEST_IN_MAJOR" ]; then
+            echo "Tagging $PKG@$VERSION as $MAJOR_TAG"
+            npm dist-tag add "$PKG@$VERSION" "$MAJOR_TAG"
           fi
 
       - name: Extract CHANGELOG section for this version
@@ -213,6 +255,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION_TAG: ${{ github.ref_name }}
+          IS_HIGHEST: ${{ steps.npm-latest.outputs.is_highest }}
         run: |
           if gh release view "$VERSION_TAG" >/dev/null 2>&1; then
             echo "GitHub Release $VERSION_TAG already exists"
@@ -221,13 +264,15 @@ jobs:
             gh release create "$VERSION_TAG" \
               --verify-tag \
               --title "$VERSION_TAG" \
-              --notes-file /tmp/release-notes.md
+              --notes-file /tmp/release-notes.md \
+              --latest="$IS_HIGHEST"
           else
             # No matching section (shouldn't happen — validate already requires one) — fall back.
             gh release create "$VERSION_TAG" \
               --verify-tag \
               --title "$VERSION_TAG" \
-              --generate-notes
+              --generate-notes \
+              --latest="$IS_HIGHEST"
           fi
 
       - name: Published summary
