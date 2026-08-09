@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-08-09
+
+### Changed
+
+- **Package renamed to `@didactika/prisma-entity`.** `prisma-entity-framework` is
+  deprecated on npm and points here. No functional changes — same code, same behavior,
+  new name. `README.md` and `package.json` (`repository`, `bugs`, `homepage`) updated to
+  match; `publishConfig.access: public` added, required for a scoped package to publish
+  publicly.
+
 ## [2.1.1] - 2026-08-09
 
 ### Fixed
