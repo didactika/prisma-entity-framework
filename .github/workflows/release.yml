@@ -140,6 +140,12 @@ jobs:
     if: always() && needs.validate.result == 'success'
     runs-on: ubuntu-latest
     needs: validate
+    # Ties this run to the repo's Environments/Deployments UI instead of just
+    # showing up as a Release — gives a real deployment history and a spot
+    # to add required reviewers later (Settings -> Environments -> npm).
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/prisma-entity-framework/v/${{ needs.validate.outputs.version }}
     permissions:
       contents: write
     steps:
