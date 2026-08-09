@@ -1,0 +1,241 @@
+name: Release
+
+# The normal path is dispatched by ci.yml after its quality gate already
+# passed on a push to a version branch (v3.x, v2.x, ...), so it does not
+# repeat the tests. A manual tag push runs the full gate itself first.
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run every check and pack the tarball, but do not publish'
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Manual-tag quality gate. The automatic path (ci.yml -> this workflow)
+  # already passed this same matrix, so it is skipped there.
+  ci:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    # Must grant everything any job in ci.yml could request, including its
+    # release job's contents:write/actions:write — GitHub validates that at
+    # call time regardless of that job's own `if` (it never actually runs
+    # here, since a tag push isn't github.event_name == 'push' on a branch).
+    permissions:
+      contents: write
+      actions: write
+    uses: ./.github/workflows/ci.yml
+
+  validate:
+    name: validate release
+    if: >-
+      always() &&
+      (needs.ci.result == 'success' || needs.ci.result == 'skipped')
+    runs-on: ubuntu-latest
+    needs: ci
+    outputs:
+      version: ${{ steps.pkg.outputs.version }}
+      name: ${{ steps.pkg.outputs.name }}
+      should_publish: ${{ steps.mode.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Read package metadata
+        id: pkg
+        run: |
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          echo "name=$(node -p "require('./package.json').name")" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve release mode
+        id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" = "true" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publishing requires a version tag
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*.*.*) ;;
+            *)
+              echo "::error::Publishing must run from a version tag, got $GITHUB_REF"
+              exit 1
+              ;;
+          esac
+
+      - name: Tag must match package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="${{ steps.pkg.outputs.version }}"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match package.json version $PKG"
+            exit 1
+          fi
+
+      - name: Version must be valid semver
+        run: |
+          echo "${{ steps.pkg.outputs.version }}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
+            || { echo "::error::Invalid semver: ${{ steps.pkg.outputs.version }}"; exit 1; }
+
+      - name: CHANGELOG must mention this version
+        run: |
+          grep -q "\[${{ steps.pkg.outputs.version }}\]" CHANGELOG.md \
+            || { echo "::error::CHANGELOG.md has no entry for ${{ steps.pkg.outputs.version }}"; exit 1; }
+
+      - name: Version must not already exist on npm
+        run: |
+          if npm view "${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }}" version >/dev/null 2>&1; then
+            echo "::error::${{ steps.pkg.outputs.name }}@${{ steps.pkg.outputs.version }} is already published"
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npx prisma generate --schema=tests/prisma/schema.test.prisma
+      - run: npm run build
+
+      - name: Built output must exist
+        run: |
+          for f in dist/index.js dist/index.mjs dist/index.d.ts; do
+            [ -s "$f" ] || { echo "::error::Missing build artifact: $f"; exit 1; }
+          done
+
+      - name: Package must be importable (CJS and ESM)
+        run: |
+          node -e "const m=require('./dist/index.js'); if(typeof m.configurePrisma!=='function') throw new Error('CJS export missing'); console.log('CJS ok');"
+          node --input-type=module -e "import('./dist/index.mjs').then(m=>{if(typeof m.configurePrisma!=='function')throw new Error('ESM export missing');console.log('ESM ok')})"
+
+      - name: Inspect the tarball (no source, no docs)
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e "
+            const [p]=require('/tmp/pack.json');
+            const files=p.files.map(f=>f.path);
+            const leaked=files.filter(f=>/^(src|tests|docs|scripts)\//.test(f));
+            if(leaked.length){console.error('Unexpected files in the package:',leaked);process.exit(1);}
+            if(!files.some(f=>f.startsWith('dist/'))){console.error('No dist/ in the package');process.exit(1);}
+            console.log('Tarball contents ok:',files.length,'files,',p.size,'bytes');
+          "
+
+  # Publish with the npm access token. Trusted (OIDC) publishing is not set
+  # up for this package yet — do not switch this to `--provenance` /
+  # `id-token: write` without setting that up first.
+  publish:
+    name: publish to npm
+    if: always() && needs.validate.result == 'success'
+    runs-on: ubuntu-latest
+    needs: validate
+    # Ties this run to the repo's Environments/Deployments UI instead of just
+    # showing up as a Release — gives a real deployment history and a spot
+    # to add required reviewers later (Settings -> Environments -> npm).
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/prisma-entity-framework/v/${{ needs.validate.outputs.version }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+      - run: npx prisma generate --schema=tests/prisma/schema.test.prisma
+      - run: npm run build
+
+      - name: Publish
+        if: needs.validate.outputs.should_publish == 'true'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Dry run
+        if: needs.validate.outputs.should_publish == 'false'
+        run: npm publish --access public --dry-run
+
+      # npm tags whatever was just published as "latest" by default. That is
+      # wrong the moment a lower-numbered branch (e.g. v2.x, a security
+      # backport) publishes after a higher one (v3.x) already exists on the
+      # registry — "latest" must always be the highest semver published, not
+      # the most recently published one. Compare and correct it explicitly.
+      - name: Point npm 'latest' at the highest published semver
+        if: needs.validate.outputs.should_publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PKG: ${{ needs.validate.outputs.name }}
+        run: |
+          HIGHEST=$(npm view "$PKG" versions --json | node -e "
+            const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            const cmp = (a, b) => {
+              const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+              for (let i = 0; i < 3; i++) { if (pa[i] !== pb[i]) return pa[i] - pb[i]; }
+              return 0;
+            };
+            console.log([].concat(data).sort(cmp).pop());
+          ")
+          CURRENT_LATEST=$(npm view "$PKG" dist-tags.latest)
+          echo "Highest published version: $HIGHEST (npm 'latest' currently: $CURRENT_LATEST)"
+          if [ "$HIGHEST" != "$CURRENT_LATEST" ]; then
+            echo "Correcting 'latest' to $HIGHEST"
+            npm dist-tag add "$PKG@$HIGHEST" latest
+          fi
+
+      - name: Extract CHANGELOG section for this version
+        if: needs.validate.outputs.should_publish == 'true'
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md | sed -e '1{/^$/d}' > /tmp/release-notes.md
+          echo "Extracted $(wc -l < /tmp/release-notes.md) line(s) from CHANGELOG.md for $VERSION"
+
+      - name: Create GitHub Release
+        if: needs.validate.outputs.should_publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$VERSION_TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $VERSION_TAG already exists"
+          elif [ -s /tmp/release-notes.md ]; then
+            # CHANGELOG.md has a matching "## [x.y.z]" section — use it verbatim as the release body.
+            gh release create "$VERSION_TAG" \
+              --verify-tag \
+              --title "$VERSION_TAG" \
+              --notes-file /tmp/release-notes.md
+          else
+            # No matching section (shouldn't happen — validate already requires one) — fall back.
+            gh release create "$VERSION_TAG" \
+              --verify-tag \
+              --title "$VERSION_TAG" \
+              --generate-notes
+          fi
+
+      - name: Published summary
+        if: needs.validate.outputs.should_publish == 'true'
+        run: |
+          echo "### Published \`${{ needs.validate.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://www.npmjs.com/package/${{ needs.validate.outputs.name }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry-run summary
+        if: needs.validate.outputs.should_publish == 'false'
+        run: echo "### Dry run completed for \`${{ needs.validate.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
