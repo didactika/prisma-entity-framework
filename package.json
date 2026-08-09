@@ -1,6 +1,9 @@
 {
-  "name": "prisma-entity-framework",
-  "version": "2.1.1",
+  "name": "@didactika/prisma-entity",
+  "version": "2.1.2",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "TypeScript Entity Framework for Prisma ORM with Active Record pattern, fluent query builder, relation graphs, batch operations, advanced CRUD, search filters, and pagination utilities.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -59,12 +62,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/didactika/prisma-entity-framework.git"
+    "url": "https://github.com/didactika/prisma-entity.git"
   },
   "bugs": {
-    "url": "https://github.com/didactika/prisma-entity-framework/issues"
+    "url": "https://github.com/didactika/prisma-entity/issues"
   },
-  "homepage": "https://github.com/didactika/prisma-entity-framework#readme",
+  "homepage": "https://github.com/didactika/prisma-entity#readme",
   "files": [
     "dist",
     "README.md",
