@@ -80,7 +80,26 @@ jobs:
     permissions:
       contents: read
     steps:
-      - run: echo "All test jobs passed."
+      # The `always()` above is what lets this job report at all when its
+      # dependencies were skipped — but it also means it runs when unit or
+      # integration FAILED, and a bare `echo` would exit 0 over a red suite.
+      # As a required check that reads green while the tests are broken,
+      # which is worse than having no gate. So the result is asserted rather
+      # than assumed.
+      - name: Every test job must have passed
+        env:
+          UNIT_RESULT: ${{ needs.unit.result }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+        run: |
+          if [ "$UNIT_RESULT" != "success" ]; then
+            echo "::error::unit did not pass (result: $UNIT_RESULT)"
+            exit 1
+          fi
+          if [ "$INTEGRATION_RESULT" != "success" ]; then
+            echo "::error::integration did not pass (result: $INTEGRATION_RESULT)"
+            exit 1
+          fi
+          echo "All test jobs passed."
 
   # A tag pushed with GITHUB_TOKEN does not trigger another workflow automatically.
   # A push to v3.x/v2.x is always an already-tested merge (verify is skipped
